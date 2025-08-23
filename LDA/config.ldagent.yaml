@@ -1,0 +1,44 @@
+mode: interactive | batch | continuous
+
+ingest:
+  video:  { enabled: true, device: 0, fps: 30 }
+  audio:  { enabled: true, device: "default", sr: 16000 }
+  text:   { enabled: true, source: "asr", asr_model: "whisper-small.en", offline: true }
+  sensors:{ enabled: false }
+
+privacy_policy:
+  export_raw_media: false
+  pii_scrub_text: true
+  persist_windows_seconds: 5
+  retention:
+    raw_buffer_minutes: 2
+    feature_store_days: 90
+
+video_pipe:
+  head_pose_normalize: true
+  openface:
+    features: ["AUs","gaze","pose","blink"]
+    binary_path: "/opt/openface/FeatureExtraction"
+
+audio_pipe:
+  vad: "webrtc"
+  denoise: true
+  features:
+    prosody: true
+    egemaps: true
+    wav2vec2: { model: "facebook/wav2vec2-base", pool: "mean" }
+
+text_pipe:
+  ner_scrub: ["PERSON","GPE","ORG"]
+  embedder: "sentence-transformers/all-MiniLM-L6-v2"
+  metrics: ["sentiment","ttr","pronoun_ratio"]
+
+storage:
+  root: "/var/secure_store"
+  encrypt: true
+  key_provider: "os-keyring"  # or "kms://…"
+
+outputs:
+  parquet_partitioning: ["modality","date","hour"]
+  emit_manifest: true
+  emit_receipts: true
