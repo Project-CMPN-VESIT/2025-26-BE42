@@ -16,7 +16,7 @@ ingest:
         # Set this to the absolute path of your FeatureExtraction binary
         binary_path: "/home/ritik/Desktop/BE-Major-Project/LDA/OpenFace/build/bin/FeatureExtraction"
         # optional: explicit haar classifier path (if you want)
-        # haar_path: "/home/ritik/Desktop/BE-Major-Project/LDA/OpenFace/build/bin/classifiers/haarcascade_frontalface_alt.xml"
+        haar_path: "/home/ritik/Desktop/BE-Major-Project/LDA/OpenFace/build/bin/classifiers/haarcascade_frontalface_alt.xml"
     persist_clips: true
 
   audio:
