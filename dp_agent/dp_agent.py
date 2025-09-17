@@ -1,7 +1,10 @@
 # dp_agent/dp_agent.py
-import os, io, json, time, hmac, hashlib
+import os, io, time, torch
 from cryptography.fernet import Fernet
-import torch
+
+# 👇 centralized receipts
+from ..centralised_receipts import CentralReceiptManager
+
 
 class DPAgent:
     def __init__(self,
@@ -17,13 +20,13 @@ class DPAgent:
         self.receipts_dir = receipts_dir
         os.makedirs(self.secure_store_dir, exist_ok=True)
         os.makedirs(self.receipts_dir, exist_ok=True)
-         # Load shared Fernet key
+
+        # Load shared Fernet key
         if fernet_key is None:
             if os.path.exists("keys/fernet.key"):
                 with open("keys/fernet.key", "rb") as f:
                     fernet_key = f.read().strip()
             else:
-                # Generate one if missing
                 os.makedirs("keys", exist_ok=True)
                 fernet_key = Fernet.generate_key()
                 with open("keys/fernet.key", "wb") as f:
@@ -31,19 +34,12 @@ class DPAgent:
 
         self.fernet = Fernet(fernet_key)
 
-        # --- demo keys (replace with KMS in prod) ---
-        if fernet_key is None:
-            fernet_key = Fernet.generate_key()
-        self.fernet = Fernet(fernet_key)
-
-        if hmac_key is None:
-            hmac_key = b"dp_demo_hmac_key_32_bytes_long____"[:32]
-        self.hmac_key = hmac_key
+        # Centralized receipt manager
+        self.rm = CentralReceiptManager()
 
     # ---------- flatten / unflatten helpers ----------
     def flatten_state_dict(self, sd):
-        tensors = []
-        meta = []
+        tensors, meta = [], []
         for k, v in sd.items():
             t = v.detach().cpu().flatten()
             tensors.append(t)
@@ -54,8 +50,7 @@ class DPAgent:
         return flat, meta
 
     def unflatten_state_dict(self, flat, meta):
-        new_sd = {}
-        idx = 0
+        new_sd, idx = {}, 0
         for k, shape, numel in meta:
             if numel == 0:
                 new_sd[k] = torch.zeros(shape)
@@ -68,14 +63,13 @@ class DPAgent:
 
     # ---------- encryption placeholders ----------
     def encrypt_bytes(self, b: bytes) -> bytes:
-        # demo symmetric encrypt (Fernet). Replace with Encryption Agent / KMS
         return self.fernet.encrypt(b)
 
     def decrypt_bytes(self, b: bytes) -> bytes:
         return self.fernet.decrypt(b)
 
     # ---------- core DP processing ----------
-    def process_local_update(self, local_update_uri: str, metadata: dict=None):
+    def process_local_update(self, local_update_uri: str, metadata: dict = None):
         """
         local_update_uri: 'file://<path>'
         metadata: optional dict (trainer's receipt fields)
@@ -91,10 +85,7 @@ class DPAgent:
         # 1) read encrypted trainer update and decrypt
         with open(path, "rb") as f:
             enc = f.read()
-        try:
-            decrypted = self.decrypt_bytes(enc)
-        except Exception as e:
-            raise RuntimeError("DPAgent: decryption failed - check key/agent") from e
+        decrypted = self.decrypt_bytes(enc)
 
         # 2) load state_dict from bytes
         buf = io.BytesIO(decrypted)
@@ -102,7 +93,7 @@ class DPAgent:
 
         # 3) flatten
         flat, meta = self.flatten_state_dict(state_dict)
-        l2_before = float(torch.norm(flat, p=2).item()) if flat.numel()>0 else 0.0
+        l2_before = float(torch.norm(flat, p=2).item()) if flat.numel() > 0 else 0.0
 
         # 4) clip
         clipped = False
@@ -112,13 +103,12 @@ class DPAgent:
 
         # 5) add Gaussian noise
         noise_std = self.noise_multiplier * self.clip
+        noisy = flat
         if flat.numel() > 0:
             noise = torch.normal(mean=0.0, std=noise_std, size=flat.shape)
             noisy = flat + noise
-        else:
-            noisy = flat
 
-        l2_after = float(torch.norm(noisy, p=2).item()) if noisy.numel()>0 else 0.0
+        l2_after = float(torch.norm(noisy, p=2).item()) if noisy.numel() > 0 else 0.0
 
         # 6) unflatten back to state_dict
         noisy_sd = self.unflatten_state_dict(noisy, meta)
@@ -136,27 +126,22 @@ class DPAgent:
         with open(out_path, "wb") as wf:
             wf.write(encrypted_out)
 
-        # 9) create signature (HMAC demo) over plaintext noisy bytes
-        signature = hmac.new(self.hmac_key, out_bytes, hashlib.sha256).hexdigest()
+        # 9) build centralized receipt
+        receipt = self.rm.create_receipt(
+            agent="dp-agent",
+            session_id=metadata.get("session_id"),  # inherit from trainer if exists
+            operation="dp_process_update",
+            params={
+                "clip_norm": self.clip,
+                "clip_applied": clipped,
+                "noise_multiplier": self.noise_multiplier,
+                "l2_norm_before": l2_before,
+                "l2_norm_after": l2_after,
+            },
+            outputs=["file://" + out_path],
+        )
 
-        # 10) build receipt (merge trainer metadata if provided)
-        receipt = {
-            "type": "train_receipt_dp",
-            "local_update_uri": "file://" + out_path,
-            "timestamp": time.time(),
-            "clip_norm": self.clip,
-            "clip_applied": clipped,
-            "noise_multiplier": self.noise_multiplier,
-            "l2_norm_before": l2_before,
-            "l2_norm_after": l2_after,
-            "signature": signature
-        }
-        receipt.update(metadata)
+        # 10) write receipt to disk
+        receipt_uri = self.rm.write_receipt(receipt, out_dir=self.receipts_dir)
 
-        # 11) write DPI receipt JSON
-        rname = out_fname.replace(".pt.enc", ".json")
-        rpath = os.path.join(self.receipts_dir, rname)
-        with open(rpath, "w") as rf:
-            json.dump(receipt, rf, indent=2)
-
-        return receipt
+        return {"receipt": receipt, "receipt_uri": receipt_uri}

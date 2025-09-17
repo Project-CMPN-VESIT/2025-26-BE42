@@ -1,16 +1,16 @@
 # enc_agent/run_demo_single_process.py
 import os
-import json
 from cryptography.fernet import Fernet
 
 from dp_agent.run_demo_single_process import main as run_dp_demo
 from enc_agent.enc_agent import EncryptionAgent
 
-def main():
+
+def encrypt_agent():
     # 🔹 Run DP demo first (produces dp_receipt in receipts/)
     run_dp_demo()
 
-    # 🔹 Load shared Fernet key (must match dp_agent + decrypt_agent)
+    # 🔹 Load shared Fernet key (same as DP + decrypt_agent)
     key_path = "keys/fernet.key"
     if not os.path.exists(key_path):
         raise FileNotFoundError("Fernet key not found! Run dp_agent first to generate one.")
@@ -28,11 +28,14 @@ def main():
 
     print(f"Encrypting DP update from: {dp_receipt_path}")
 
-    # 🔹 Use Fernet mode with the same key
+    # 🔹 Use Fernet mode (consistent with DP Agent demo)
     enc_agent = EncryptionAgent(mode="fernet", symmetric_key=fernet_key)
-    enc_receipt = enc_agent.process_dp_update(dp_receipt_path)
+    result = enc_agent.process_dp_update(dp_receipt_path)
 
-    print("✅ Encryption receipt created:", enc_receipt)
+    receipt = result["receipt"]
+    receipt_uri = result["receipt_uri"]
 
-if __name__ == "__main__":
-    main()
+    print("✅ Encryption receipt created and stored:")
+    print("   Receipt URI:", receipt_uri)
+    print("   Receipt JSON:", receipt)
+

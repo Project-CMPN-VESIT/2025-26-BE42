@@ -1,13 +1,17 @@
 # dp_agent/run_demo_single_process.py
-import os, io, json, time
+import os, io, time, torch, json
 from cryptography.fernet import Fernet
-import torch
 from dp_agent.dp_agent import DPAgent
 
-def make_state_dict():
-    return {"w1": torch.randn(20,20), "b1": torch.randn(20)}
+# 👇 centralized receipts
+from ..centralised_receipts import CentralReceiptManager
 
-def main():
+
+def make_state_dict():
+    return {"w1": torch.randn(20, 20), "b1": torch.randn(20)}
+
+
+def diff_privacy():
     # 🔹 Load or generate Fernet key (shared across pipeline)
     os.makedirs("keys", exist_ok=True)
     key_path = "keys/fernet.key"
@@ -20,11 +24,9 @@ def main():
             f.write(demo_key)
         print("Generated new Fernet key -> keys/fernet.key")
 
-    hmac_key = b"dp_demo_hmac_key_32_bytes_long____"[:32]
-
     # 🔹 Trainer creates encrypted update
     os.makedirs("secure_store/local_updates", exist_ok=True)
-    fname = f"trainer_{int(time.time()*1000)}.pt.enc"
+    fname = f"trainer_{int(time.time() * 1000)}.pt.enc"
     path = os.path.join("secure_store/local_updates", fname)
 
     sd = make_state_dict()
@@ -38,19 +40,24 @@ def main():
     with open(path, "wb") as wf:
         wf.write(enc)
 
-    # 🔹 Trainer receipt
-    receipt = {
-        "type": "train_receipt",
-        "local_update_uri": "file://" + path,
-        "epochs": 1,
-        "batch_size": 32,
-        "dataset_size": 1000,
-        "timestamp": time.time()
-    }
+    # 🔹 Create trainer receipt using CentralReceiptManager
+    rm = CentralReceiptManager()
+    trainer_receipt = rm.create_receipt(
+        agent="trainer-agent",
+        session_id=f"sess-{int(time.time())}",
+        operation="train_step",
+        params={
+            "epochs": 1,
+            "batch_size": 32,
+            "dataset_size": 1000,
+        },
+        outputs=["file://" + path],
+    )
+
     os.makedirs("receipts", exist_ok=True)
-    rfname = fname.replace(".pt.enc", ".json")
-    with open(os.path.join("receipts", rfname), "w") as rf:
-        json.dump(receipt, rf, indent=2)
+    trainer_receipt_uri = rm.write_receipt(trainer_receipt, out_dir="receipts")
+
+    print("Trainer receipt created:", trainer_receipt_uri)
 
     # 🔹 Run DP agent with same Fernet key
     dp = DPAgent(
@@ -59,10 +66,13 @@ def main():
         secure_store_dir="secure_store/local_updates",
         receipts_dir="receipts",
         fernet_key=demo_key,   # same Fernet key
-        hmac_key=hmac_key
     )
-    dp_receipt = dp.process_local_update(receipt['local_update_uri'], metadata=receipt)
-    print("DP receipt created:", dp_receipt)
+
+    dp_result = dp.process_local_update(
+        trainer_receipt["outputs"][0], metadata=trainer_receipt
+    )
+    print("DP receipt created:", dp_result["receipt_uri"])
+
 
 if __name__ == "__main__":
-    main()
+    diff_privacy()
