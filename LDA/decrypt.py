@@ -103,7 +103,7 @@ def decrypt_with_candidates(ct: bytes, nonce: bytes,
 
 
 def main():
-    encrypted_file = "/home/ritik26/Desktop/BE-Major-Project/LDA/secure_store/sess-1756473835/session/2025-08-29/13.parquet.enc"
+    encrypted_file = "/home/ritik26/Desktop/BE-Major-Project/LDA/secure_store/sess-1757762287/session/2025-09-13/11.parquet.enc"
     master_key_file = "/home/ritik26/Desktop/BE-Major-Project/LDA/secure_store/master.key"
 
     p = Path(encrypted_file)
