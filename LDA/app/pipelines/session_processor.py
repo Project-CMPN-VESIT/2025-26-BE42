@@ -1,4 +1,4 @@
-# app/pipelines/session_processor.py
+# LDA/app/pipelines/session_processor.py
 """
 Session processor for the Local Data Agent (Privacy).
 
@@ -10,7 +10,7 @@ Provides:
 Behavior:
 - Tries to use high-quality libs when available (pyannote, whisper, librosa, mediapipe).
 - Falls back to simpler implementations otherwise (energy-based VAD, single-speaker fallback).
-- All persisted artifacts (clips, integrated parquet, manifests, receipts) should be written
+- All persisted artifacts (clips, integrated parquet, manifests, receipts) are written
   using SecureStore.encrypt_write so data at rest is encrypted.
 """
 
@@ -28,7 +28,7 @@ import shutil
 import logging
 
 from centralized_secure_store import SecureStore
-from centralised_receipts import ReceiptManager
+from centralised_receipts import CentralReceiptManager
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -61,7 +61,6 @@ def _safe_import(name: str):
 _librosa = _safe_import("librosa")
 _npy = _safe_import("numpy")
 _webrtcvad = _safe_import("webrtcvad")
-# pyannote (diarization), whisper (ASR), resemblyzer etc.
 _pyannote = _safe_import("pyannote.audio")
 _whisper = _safe_import("whisper")  # openai/whisper package (if installed)
 _transformers = _safe_import("transformers")
@@ -75,7 +74,6 @@ _face_recognition = _safe_import("face_recognition")
 # --------------------------
 # Audio / Video helpers
 # --------------------------
-
 def _extract_audio_from_video(video_path: str, out_wav_path: str, sr: int = 16000) -> str:
     """
     Extract audio from video using ffmpeg and resample to sr (Hz) mono wav.
@@ -543,13 +541,14 @@ def _write_clip_and_encrypt_audio(store: SecureStore, audio_wav: str, start: flo
         _cut_audio_segment(audio_wav, str(temp_clip), start, end)
         with open(temp_clip, "rb") as f:
             payload = f.read()
-        # FIX: Use file:// prefix
-        uri = store.encrypt_write(f"file://{store.root / clip_rel}", payload)
-        # ...rest of code unchanged...
+        # compute uri and write via store
+        uri = f"file://{store.root / clip_rel}"
+        store.encrypt_write(uri, payload)
         return uri
     except Exception as e:
         log.warning("Failed to write/encrypt audio clip: %s", e)
         return None
+
 
 def _write_clip_and_encrypt_video(store: SecureStore, video_path: str, start: float, end: float,
                                   session_id: str, work_dir: Path, cfg: dict) -> Optional[str]:
@@ -560,13 +559,13 @@ def _write_clip_and_encrypt_video(store: SecureStore, video_path: str, start: fl
         _cut_video_segment(video_path, str(temp_clip), start, end)
         with open(temp_clip, "rb") as f:
             payload = f.read()
-        # FIX: Use file:// prefix
-        uri = store.encrypt_write(f"file://{store.root / clip_rel}", payload)
-        # ...rest of code unchanged...
+        uri = f"file://{store.root / clip_rel}"
+        store.encrypt_write(uri, payload)
         return uri
     except Exception as e:
         log.warning("Failed to cut/encrypt video clip: %s", e)
         return None
+
 
 # --------------------------
 # Feature extraction (simple audio + placeholders)
@@ -692,7 +691,7 @@ def process_session_file(session_id: str, cfg: dict, work_dir: Path,
 
     rows: list of dicts (schema as discussed earlier)
     artifacts: dict of artifact labels -> URIs
-    receipts: list of receipt file paths (strings)
+    receipts: list of encrypted receipt URIs (strings)
     """
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -702,17 +701,8 @@ def process_session_file(session_id: str, cfg: dict, work_dir: Path,
 
     # create secure store
     store = SecureStore(cfg["storage"]["root"])
-    # receipt manager - use video receipt dir by default
-    receipt_mgr = ReceiptManager(cfg.get("ingest", {}).get("video", {}).get("receipt_dir", "./receipts"))
-
-    # Ensure audio exists (extract from video if necessary)
-    if video_path and not audio_path:
-        try:
-            audio_path = _extract_audio_from_video(video_path, str(work_dir / "raw_audio.wav"), sr=cfg.get("ingest", {}).get("audio", {}).get("sr", 16000))
-            artifacts["raw_audio"] = audio_path
-        except Exception as e:
-            log.warning("Audio extraction from video failed: %s", e)
-            audio_path = None
+    # centralized receipt manager
+    receipt_mgr = CentralReceiptManager(agent="lda-session-processor")
 
     # If mode == text and only text_input provided
     if mode == "text":
@@ -733,8 +723,30 @@ def process_session_file(session_id: str, cfg: dict, work_dir: Path,
             "derived": {},
             "receipt_path": None
         }
+        # create and store receipt for text ingest
+        receipt = receipt_mgr.create_receipt(
+            agent="lda-session-processor",
+            session_id=session_id,
+            operation="text_ingest",
+            params={"text_len": len(text_input or "")},
+            outputs=[]
+        )
+        rrel = f"{session_id}/receipts/{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}_text.json.enc"
+        receipt_uri = f"file://{store.root / rrel}"
+        store.encrypt_write(receipt_uri, json.dumps(receipt).encode())
+        row["receipt_path"] = receipt_uri
+        receipts.append(receipt_uri)
         rows.append(row)
         return rows, artifacts, receipts
+
+    # Ensure audio exists (extract from video if necessary)
+    if video_path and not audio_path:
+        try:
+            audio_path = _extract_audio_from_video(video_path, str(work_dir / "raw_audio.wav"), sr=cfg.get("ingest", {}).get("audio", {}).get("sr", 16000))
+            artifacts["raw_audio"] = audio_path
+        except Exception as e:
+            log.warning("Audio extraction from video failed: %s", e)
+            audio_path = None
 
     # For session / continuous modes:
     if not audio_path:
@@ -772,7 +784,7 @@ def process_session_file(session_id: str, cfg: dict, work_dir: Path,
         speaker_to_role = roles.copy()
     else:
         # attempt mapping via simple heuristic: spk0 -> patient, spk1 -> counsellor (user may override)
-        unique_speakers = list({seg.get("speaker") for seg in diarization if seg.get("speaker")})
+        unique_speakers = list({seg.get("speaker") for seg in diarization if seg.get("speaker")}) if diarization else []
         unique_speakers_sorted = sorted(unique_speakers)
         if unique_speakers_sorted:
             # assign patient to spk1 and counsellor to spk0 by heuristic (user can override)
@@ -830,6 +842,24 @@ def process_session_file(session_id: str, cfg: dict, work_dir: Path,
             "receipt_path": None
         }
         rows.append(row)
+
+        # create receipt per segment and store it encrypted
+        try:
+            receipt = receipt_mgr.create_receipt(
+                agent="lda-session-processor",
+                session_id=session_id,
+                operation="segment_process",
+                params={"start": start, "end": end, "speaker": speaker, "role": role},
+                outputs=[u for u in (audio_uri, video_uri) if u]
+            )
+            rrel = f"{session_id}/receipts/{datetime.utcnow().strftime('%Y-%m-%d_%H%M%S')}_{seg_counter}.json.enc"
+            receipt_uri = f"file://{store.root / rrel}"
+            store.encrypt_write(receipt_uri, json.dumps(receipt).encode())
+            row["receipt_path"] = receipt_uri
+            receipts.append(receipt_uri)
+        except Exception as e:
+            log.warning("Failed to create/store segment receipt: %s", e)
+            # leave receipt_path as None for this row
 
     # 7) If mode == session, assemble QA pairs
     if mode == "session":

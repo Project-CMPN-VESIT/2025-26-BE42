@@ -15,8 +15,8 @@ except Exception:
     HAS_BOTO3 = False
 
 # Centralized modules
-from ..centralised_receipts import CentralReceiptManager
-from ..centralized_secure_store import SecureStore
+from centralised_receipts import CentralReceiptManager
+from centralized_secure_store import SecureStore
 
 
 class EncryptionAgent:
@@ -56,6 +56,9 @@ class EncryptionAgent:
 
     # ---------------- main entry ----------------
     def process_dp_update(self, dp_receipt_path: str) -> Dict[str, Any]:
+        if dp_receipt_path.startswith("file://"):
+            dp_receipt_path = dp_receipt_path[len("file://"):]
+
         with open(dp_receipt_path, "r") as rf:
             dp_receipt = json.load(rf)
 

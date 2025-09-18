@@ -14,11 +14,18 @@ from cryptography.hazmat.backends import default_backend
 class SecureStore:
     """
     Centralized AES-GCM encrypted store.
-    Keys are derived deterministically from the parent directory path
-    using HKDF, so files in the same directory can always be decrypted.
+    Keys are derived deterministically from (agent + parent directory path)
+    using HKDF, so each agent has an isolated key namespace while still
+    sharing the same master key material.
     """
 
-    def __init__(self, root: Union[str, Path] = "./secure_store", key_path: Union[str, Path] = None):
+    def __init__(
+        self,
+        agent: str = "generic",
+        root: Union[str, Path] = "./secure_store",
+        key_path: Union[str, Path] = None
+    ):
+        self.agent = agent
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         if key_path is None:
@@ -27,6 +34,7 @@ class SecureStore:
         self.master_key = self._load_or_create_master_key()
 
     def _load_or_create_master_key(self) -> bytes:
+        """Load or generate a global master key (shared across all agents)."""
         if self.key_path.exists():
             txt = self.key_path.read_text().strip()
             try:
@@ -39,17 +47,22 @@ class SecureStore:
             return k
 
     def _derive_key(self, context: str) -> bytes:
+        """
+        Derive a per-agent, per-directory key using HKDF.
+        Context = f"{agent}:{directory}"
+        """
+        info = f"{self.agent}:{context}".encode()
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
             salt=None,
-            info=context.encode(),
+            info=info,
             backend=default_backend(),
         )
         return hkdf.derive(self.master_key)
 
     # ------------------ write ------------------
-    def encrypt_write(self, uri: str, data: bytes):
+    def encrypt_write(self, uri: str, data: bytes) -> str:
         assert uri.startswith("file://"), "URI must start with file://"
         p = Path(uri[len("file://"):])
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -59,9 +72,12 @@ class SecureStore:
         nonce = os.urandom(12)
         ct = aesgcm.encrypt(nonce, data, None)
 
-        payload = {"nonce": base64.b64encode(nonce).decode(),
-                   "ct": base64.b64encode(ct).decode()}
+        payload = {
+            "nonce": base64.b64encode(nonce).decode(),
+            "ct": base64.b64encode(ct).decode(),
+        }
         p.write_text(json.dumps(payload))
+        return uri  # return the file:// URI for consistency
 
     # ------------------ read ------------------
     def decrypt_read(self, uri: str) -> bytes:

@@ -17,13 +17,10 @@ class CentralReceiptManager:
     Provides HMAC-based signing, writing, and verification of receipts.
     """
 
-    def __init__(self, key_source: Optional[str] = None, key_size: int = 32):
-        """
-        key_source:
-            - If None → use ~/.local_data_agent_receipt_key
-            - If "env:VAR" → load from environment variable
-            - If "file:/path/to/key" → load from file
-        """
+    def __init__(self, agent: Optional[str] = None,
+                 key_source: Optional[str] = None, key_size: int = 32):
+        self.agent = agent
+        # --- existing key load logic ---
         if key_source is None:
             key_path = Path.home() / ".local_data_agent_receipt_key"
             if key_path.exists():
@@ -39,6 +36,28 @@ class CentralReceiptManager:
             self.hmac_key = base64.b64decode(path.read_text())
         else:
             raise ValueError("Unsupported key_source format")
+
+    def create_receipt(
+        self,
+        agent: Optional[str],
+        operation: str,
+        params: Dict[str, Any],
+        outputs: List[str],
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build a standardized receipt payload.
+        If agent not given here, fallback to self.agent.
+        """
+        payload = {
+            "agent": agent or self.agent or "unknown",
+            "session_id": session_id or f"sess-{uuid.uuid4().hex}",
+            "operation": operation,
+            "params": params,
+            "outputs": outputs,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+        return self.sign(payload)
 
     def sign(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -63,27 +82,6 @@ class CentralReceiptManager:
             hashlib.sha256
         ).digest()
         return hmac.compare_digest(expected, base64.b64decode(sig_b64))
-
-    def create_receipt(
-        self,
-        agent: str,
-        operation: str,
-        params: Dict[str, Any],
-        outputs: List[str],
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Build a standardized receipt payload.
-        """
-        payload = {
-            "agent": agent,
-            "session_id": session_id or f"sess-{uuid.uuid4().hex}",
-            "operation": operation,
-            "params": params,
-            "outputs": outputs,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-        }
-        return self.sign(payload)
 
     def write_receipt(
         self,

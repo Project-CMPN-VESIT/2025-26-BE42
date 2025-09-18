@@ -1,8 +1,0 @@
-{
-  "type": "train_receipt",
-  "local_update_uri": "file://secure_store/local_updates\\trainer_1758045237256.pt.enc",
-  "epochs": 1,
-  "batch_size": 32,
-  "dataset_size": 1000,
-  "timestamp": 1758045237.272037
-}

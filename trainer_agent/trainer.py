@@ -1,6 +1,6 @@
 import torch, torch.optim as optim
 import torch.nn as nn
-from model import DummyModel
+from trainer_agent.model import DummyModel
 
 def compute_weight_delta(before, after):
     delta = {}

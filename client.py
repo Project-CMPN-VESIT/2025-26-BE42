@@ -6,6 +6,7 @@ import torch
 import argparse
 import pyarrow.parquet as pq
 import numpy as np
+import pyarrow as pa
 
 # --- LDA ---
 from LDA.app.main import preprocess, PreprocessRequest
@@ -25,18 +26,28 @@ from enc_agent.enc_agent import EncryptionAgent
 # -------------------
 # Helper: Read embeddings from parquet
 # -------------------
-def read_embeddings_from_parquet(parquet_uri: str):
-    assert parquet_uri.startswith("file://"), "Parquet URI must be file://"
-    path = parquet_uri[len("file://"):]
-    table = pq.read_table(path)
-    df = table.to_pandas()
+import io
+import pyarrow.parquet as pq
 
-    # assume embeddings are in a column named "embedding" as list/ndarray
-    if "embedding" not in df.columns:
-        raise RuntimeError("Parquet missing 'embedding' column")
+def read_embeddings_from_parquet(store: SecureStore, uri: str):
+    """
+    Decrypt parquet bytes from SecureStore into PyArrow Table.
+    """
+    data = store.decrypt_read(uri)
+    buf = io.BytesIO(data)
+    return pq.read_table(buf)
 
-    return np.stack(df["embedding"].to_list())
 
+def read_manifest(store: SecureStore, manifest_uri: str):
+    """
+    Decrypts the manifest JSONL file and returns a list of parquet URIs.
+    """
+    data = store.decrypt_read(manifest_uri)
+    lines = data.decode().splitlines()
+    manifest = [json.loads(line) for line in lines]
+
+    parquet_uris = sorted(set(m["uri"] for m in manifest if m["uri"].endswith(".parquet.enc")))
+    return parquet_uris
 
 # -------------------
 # Main pipeline
@@ -60,9 +71,26 @@ def run_pipeline(args):
 
     # ---------------- Trainer Step ----------------
     print("\n=== STEP 2: Training Agent ===")
-    embs = read_embeddings_from_parquet(session_parquet)
-    if len(embs) == 0:
-        raise RuntimeError("No embeddings found from LDA step")
+
+    # 1. Read manifest → get parquet URIs
+    parquet_uris = read_manifest(store, session_parquet)
+    if not parquet_uris:
+        raise RuntimeError("No parquet embeddings found in manifest")
+
+    # 2. Load all parquet tables into one tensor
+    tables = [read_embeddings_from_parquet(store, uri) for uri in parquet_uris]
+    combined = pa.concat_tables(tables)
+    df = combined.to_pandas()
+
+    # Assume embeddings are stored in a column called "embedding" (list of floats)
+    if "embedding" in df.columns:
+        embs = np.stack(df["embedding"].to_numpy())
+    else:
+        # fallback: use all numeric columns directly
+        embs = df.select_dtypes(include=[np.number]).to_numpy()
+
+    if embs.shape[0] == 0:
+        raise RuntimeError("Embeddings are empty after loading parquet")
 
     X = torch.tensor(embs, dtype=torch.float32)
     y = torch.zeros(X.shape[0], dtype=torch.long)  # dummy labels

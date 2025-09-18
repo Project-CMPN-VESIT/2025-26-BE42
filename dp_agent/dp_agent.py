@@ -1,8 +1,8 @@
 import os, io, time, torch
 
 # 👇 centralized receipts + secure store
-from ..centralised_receipts import CentralReceiptManager
-from ..centralized_secure_store import SecureStore
+from centralised_receipts import CentralReceiptManager
+from centralized_secure_store import SecureStore
 
 
 class DPAgent:

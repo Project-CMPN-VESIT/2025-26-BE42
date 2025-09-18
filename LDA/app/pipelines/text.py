@@ -12,14 +12,16 @@ except Exception:
     USE_SPACY = False
 
 from centralized_secure_store import SecureStore
-from centralised_receipts import make_receipt
+from centralised_receipts import CentralReceiptManager
 
 
 class TextPreprocessor:
-    def __init__(self, storage: SecureStore, out_dir: Path):
+    def __init__(self, storage: SecureStore, out_dir: Path, agent: str = "lda-text-processor"):
         self.storage = storage
+        storage.agent = agent
         self.out_dir = out_dir
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.receipt_mgr = CentralReceiptManager(agent=agent)
 
     def scrub_pii(self, text: str) -> str:
         """Remove obvious PII using regex, optionally reinforce with spaCy NER."""
@@ -29,7 +31,6 @@ class TextPreprocessor:
 
         if USE_SPACY:
             doc = nlp(text)
-            new_tokens = []
             for ent in doc.ents:
                 if ent.label_ in ["PERSON", "GPE", "ORG"]:
                     text = text.replace(ent.text, f"[{ent.label_}]")
@@ -50,12 +51,18 @@ class TextPreprocessor:
         # Save encrypted JSON
         uri = self.storage.encrypt_write(f"file://{fpath}", json.dumps(record).encode())
 
-        receipt = make_receipt("text", {
-            "uri": uri,
-            "source": source,
-            "hash": h,
-        })
-        return receipt
+        # Create + encrypt receipt
+        receipt = self.receipt_mgr.create_receipt(
+            session_id=h,
+            operation="text_process",
+            params={"source": source},
+            outputs=[uri]
+        )
+
+        receipt_uri = f"file://{self.storage.root / 'receipts' / f'{h}_text.json.enc'}"
+        self.storage.encrypt_write(receipt_uri, json.dumps(receipt).encode())
+
+        return {"receipt_uri": receipt_uri, "receipt": receipt}
 
     def process_asr_output(self, asr_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -67,9 +74,9 @@ class TextPreprocessor:
         }
         """
         text = asr_result.get("text", "")
-        receipt = self.process_text(text, source="asr")
-        receipt["confidence"] = asr_result.get("confidence")
-        return receipt
+        result = self.process_text(text, source="asr")
+        result["receipt"]["confidence"] = asr_result.get("confidence")
+        return result
 
 
 def process_text_file(

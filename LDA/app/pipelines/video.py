@@ -4,9 +4,10 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import Dict, Any
+import json
 
 from centralized_secure_store import SecureStore
-from centralised_receipts import make_receipt
+from centralised_receipts import CentralReceiptManager
 
 
 class VideoProcessor:
@@ -16,6 +17,7 @@ class VideoProcessor:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.openface_bin = Path(openface_bin)
         self.face_cascade = cv2.CascadeClassifier(haar_xml)
+        self.receipt_mgr = CentralReceiptManager(agent="lda-video-processor")
 
     def detect_faces(self, frame):
         """Detect faces in a single frame."""
@@ -103,12 +105,18 @@ class VideoProcessor:
 
         shutil.rmtree(tmp_dir)
 
-        receipt = make_receipt("video", {
-            "video_uri": uri_video,
-            "features_uri": uri_features,
-            "faces_detected": face_found,
-        })
-        return receipt
+        # Create + encrypt receipt
+        receipt = self.receipt_mgr.create_receipt(
+            agent="lda-video-processor",
+            session_id=video_path.stem,
+            operation="video_process",
+            params={"faces_detected": face_found},
+            outputs=[uri_video, uri_features] if uri_features else [uri_video],
+        )
+        receipt_uri = f"file://{self.storage.root / video_path.stem / 'receipts' / 'video.json.enc'}"
+        self.storage.encrypt_write(receipt_uri, json.dumps(receipt).encode())
+
+        return {"receipt_uri": receipt_uri, "receipt": receipt}
 
 
 def process_video_file(video_path: str, storage: SecureStore, out_dir: str, openface_bin: str, haar_xml: str):
