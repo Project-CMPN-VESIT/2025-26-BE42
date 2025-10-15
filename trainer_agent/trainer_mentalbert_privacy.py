@@ -350,6 +350,99 @@ def fine_tune_supervised(model: MultiModalModel, dataset: MultiModalDataset, epo
             print(f"[supervised] epoch {epoch+1}/{epochs} avg_loss={total_loss/steps:.4f}")
     return model
 
+# ---------- Unified supervised training + evaluation + explainability ----------
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, mean_absolute_error
+
+def train_model(dataset: MultiModalDataset, model: MultiModalModel,
+                output_dir: str = "./trainer_outputs",
+                epochs: int = 5, batch_size: int = 8, lr: float = 2e-5,
+                device: str = DEFAULT_DEVICE):
+    """
+    Complete supervised fine-tuning on labeled PHQ data + evaluation + explainability.
+    Produces model weights, metrics.json, and explain.txt.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    model.to(device)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_batch)
+
+    optimizer = AdamW(model.parameters(), lr=lr)
+    cls_loss_fn = nn.CrossEntropyLoss()
+    reg_loss_fn = nn.MSELoss()
+
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0.0
+        for b in loader:
+            b = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in b.items()}
+            optimizer.zero_grad()
+            logits, reg_pred, _ = model(b["input_ids"], b["attention_mask"],
+                                        audio_vec=b.get("audio_vec"), vision_vec=b.get("video_vec"))
+            loss_cls = cls_loss_fn(logits, b["label"])
+            loss_reg = reg_loss_fn(reg_pred, b["phq"])
+            loss = loss_cls + 0.5 * loss_reg
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            total_loss += loss.item()
+        print(f"[train_model] epoch {epoch+1}/{epochs} avg_loss={total_loss/len(loader):.4f}")
+
+    # ---------- Evaluation ----------
+    model.eval()
+    y_true_cls, y_pred_cls = [], []
+    y_true_phq, y_pred_phq = [], []
+    with torch.no_grad():
+        for b in loader:
+            b = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in b.items()}
+            logits, reg_pred, _ = model(b["input_ids"], b["attention_mask"],
+                                        audio_vec=b.get("audio_vec"), vision_vec=b.get("video_vec"))
+            probs = torch.softmax(logits, dim=1)
+            preds_cls = probs.argmax(dim=1)
+            y_true_cls.extend(b["label"].cpu().tolist())
+            y_pred_cls.extend(preds_cls.cpu().tolist())
+            y_true_phq.extend(b["phq"].cpu().tolist())
+            y_pred_phq.extend(reg_pred.cpu().tolist())
+
+    acc = accuracy_score(y_true_cls, y_pred_cls)
+    prec, rec, f1, _ = precision_recall_fscore_support(y_true_cls, y_pred_cls, average="binary")
+    mae = mean_absolute_error(y_true_phq, y_pred_phq)
+
+    metrics = {
+        "accuracy": float(acc),
+        "precision": float(prec),
+        "recall": float(rec),
+        "f1": float(f1),
+        "mae": float(mae),
+    }
+
+    # ---------- Explainability ----------
+    explain_path = os.path.join(output_dir, "explain.txt")
+    with open(explain_path, "w") as f:
+        f.write("=== Explainability Report ===\n")
+        f.write(f"Metrics: {json.dumps(metrics, indent=2)}\n\n")
+        try:
+            first_batch = next(iter(loader))
+            importance = modality_ablation_importance(model, first_batch, device=device)
+            f.write("Modality contributions (approx):\n")
+            for k, v in importance["raw"].items():
+                f.write(f"  {k}: {v:.4f}\n")
+        except Exception as e:
+            f.write(f"[WARN] Explainability failed: {e}\n")
+
+    # ---------- Save everything ----------
+    model_path = os.path.join(output_dir, "mentalbert_privacy_subset.pt")
+    torch.save(model.state_dict(), model_path)
+    with open(os.path.join(output_dir, "metrics.json"), "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    print(f"[train_model] model saved → {model_path}")
+    print(f"[train_model] metrics saved → metrics.json, explain.txt")
+
+    return {
+        "model_path": model_path,
+        "metrics_path": os.path.join(output_dir, "metrics.json"),
+        "explain_path": explain_path,
+        "metrics": metrics
+    }
 
 # ---------- RL Update (REINFORCE) ----------
 class MovingBaseline:
@@ -607,7 +700,9 @@ def orchestrate(input_path: str, mode: str = "autonomous", device: str = DEFAULT
         for r, cp in zip(records, corrected_phq):
             r["phq_score"] = float(cp)
         ds_supervised = MultiModalDataset(records, tokenizer)
-        model = fine_tune_supervised(model, ds_supervised, epochs=epochs, batch_size=batch_size, lr=lr, device=device)
+        train_result = train_model(ds_supervised, model, output_dir=str(LOCAL_SAVE_DIR),
+                           epochs=epochs, batch_size=batch_size, lr=lr, device=device)
+        model.load_state_dict(torch.load(train_result["model_path"], map_location=device))
         after = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
         delta = compute_state_delta(base_state, after)
         # apply safety

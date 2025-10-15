@@ -30,8 +30,8 @@ ingest:
         prosody: true
         egemaps:
           enabled: true
-          opensmile_binary: "/home/ritik26/Desktop/BE-Major-Project/opensmile/build/SMILExtract"
-          opensmile_config: "/home/ritik26/Desktop/BE-Major-Project/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
+          opensmile_binary: "/home/ritik26/Desktop/BE-Major-Project/LDA/opensmile/build/SMILExtract"
+          opensmile_config: "/home/ritik26/Desktop/BE-Major-Project/LDA/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
         wav2vec2:
           enabled: true
           model: "facebook/wav2vec2-base-960h"
@@ -78,8 +78,8 @@ audio_pipe:
     prosody: true
     egemaps:
       enabled: true
-      opensmile_binary: "/home/ritik26/Desktop/BE-Major-Project/opensmile/build/SMILExtract"
-      opensmile_config: "/home/ritik26/Desktop/BE-Major-Project/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
+      opensmile_binary: "/home/ritik26/Desktop/BE-Major-Project/LDA/opensmile/build/SMILExtract"
+      opensmile_config: "/home/ritik26/Desktop/BE-Major-Project/LDA/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
     wav2vec2:
       enabled: true
       model: "facebook/wav2vec2-base-960h"
