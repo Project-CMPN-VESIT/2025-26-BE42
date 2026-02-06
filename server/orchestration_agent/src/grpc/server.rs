@@ -104,10 +104,10 @@ impl Orchestrator for Service {
         let receipt = req.into_inner();
 
         // 2. Verify receipt signature
-        let pubkey = self.state.devices
-            .get(&receipt.device_id)
-            .ok_or_else(|| Status::permission_denied("unknown device"))?
-            .clone();
+        let pubkey = self.state.devices.iter()
+            .find(|entry| ct_eq(entry.key(), &receipt.device_id))
+            .map(|entry| entry.value().clone())
+            .ok_or_else(|| Status::permission_denied("unknown device"))?;
 
         let mut msg = Vec::new();
         msg.extend_from_slice(&receipt.device_id);

@@ -17,6 +17,13 @@ from pathlib import Path
 
 import grpc
 
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module="sklearn"
+)
+
 # -----------------------------
 # gRPC imports (generated)
 # -----------------------------
@@ -55,7 +62,7 @@ def load_or_create_keypair():
 # -----------------------------
 # Config
 # -----------------------------
-ORCHESTRATOR_ADDR = "127.0.0.1:50051"
+ORCHESTRATOR_ADDR = "42.111.108.21:50051"
 CLIENT_ID_PATH = Path("./client_id.bin")
 SECURE_STORE_ROOT = Path("./secure_store")
 
@@ -87,11 +94,8 @@ def run_client_once():
     # --------------------------------------------------
     # 1) gRPC channel + stub (MUST come before register)
     # --------------------------------------------------
-    creds = grpc.ssl_channel_credentials(
-        root_certificates=open("/home/ritik26/Desktop/BE-Major-Project/server/orchestration_agent/certs/ca.pem", "rb").read()
-    )
-
-    channel = grpc.secure_channel(ORCHESTRATOR_ADDR, creds)
+    # creds = grpc.ssl_channel_credentials()
+    channel = grpc.insecure_channel(ORCHESTRATOR_ADDR)
     stub = OrchestratorStub(channel)
 
     # --------------------------------------------------
