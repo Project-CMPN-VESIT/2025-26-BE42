@@ -1,4 +1,7 @@
 use sha2::{Digest, Sha256};
+use std::process::Command;
+use std::fs;
+use anyhow::Result;
 
 /// Hash arbitrary bytes (used for receipts, ledger entries)
 pub fn hash_bytes(data: &[u8]) -> [u8; 32] {

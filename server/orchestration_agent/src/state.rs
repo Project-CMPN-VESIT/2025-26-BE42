@@ -7,6 +7,7 @@ pub type DeviceId = Vec<u8>;
 pub struct OrchestratorState {
     pub devices: DashMap<DeviceId, Vec<u8>>, // device_id -> pubkey
     pub rounds: DashMap<u64, Round>,
+    pub enrollment_tokens: DashMap<String, ()>,
 }
 
 impl OrchestratorState {
@@ -14,6 +15,7 @@ impl OrchestratorState {
         let s = Arc::new(Self {
             devices: DashMap::new(),
             rounds: DashMap::new(),
+            enrollment_tokens: DashMap::new(),
         });
 
         s.rounds.insert(1, Round {

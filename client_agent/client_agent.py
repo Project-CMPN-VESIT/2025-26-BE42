@@ -41,6 +41,14 @@ from centralized_secure_store import SecureStore
 from tempfile import NamedTemporaryFile
 import json
 
+from installer.security.integrity import integrity_guard
+integrity_guard()
+
+from installer.security.runtime_guard import enforce
+
+enforce()   # ← FIRST LINE
+
+
 KEY_PATH = Path("./device_key.pem")
 
 def load_or_create_keypair():

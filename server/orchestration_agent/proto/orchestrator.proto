@@ -5,6 +5,9 @@ service Orchestrator {
   rpc RegisterDevice (CSR) returns (Certificate);
   rpc GetRound (DeviceId) returns (RoundMetadata);
   rpc SubmitReceipt (Receipt) returns (Ack);
+
+  // ✅ Enrollment RPC MUST be inside service
+  rpc EnrollDevice (EnrollRequest) returns (EnrollResponse);
 }
 
 message CSR {
@@ -24,7 +27,7 @@ message RoundMetadata {
   string model_version = 2;
   double epsilon_max = 3;
   string upload_uri = 4;
-  string state = 5;   
+  string state = 5;
   uint32 num_updates = 6;
   string aggregation_mode = 7;
 }
@@ -38,9 +41,18 @@ message Receipt {
 
   string enc_uri = 6;
   string scheme = 7;
-  string nonce = 8;   
+  string nonce = 8;
 }
 
 message Ack {
+  bool ok = 1;
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;
+  bytes device_pubkey = 2;
+}
+
+message EnrollResponse {
   bool ok = 1;
 }

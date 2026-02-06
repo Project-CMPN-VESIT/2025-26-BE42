@@ -8,6 +8,7 @@ mod pubsub;
 mod receipts;
 mod round;
 mod state;
+mod otp;
 
 use crate::config::Config;
 use crate::state::OrchestratorState;

@@ -28,6 +28,8 @@ use crate::grpc::orchestrator::{
     DeviceId,
     Receipt,
     RoundMetadata,
+    EnrollRequest,
+    EnrollResponse,
 };
 
 use crate::grpc::orchestrator::orchestrator_server::{
@@ -45,6 +47,29 @@ pub struct Service {
 #[tonic::async_trait]
 impl Orchestrator for Service {
 
+    async fn enroll_device(
+        &self,
+        req: Request<EnrollRequest>,
+    ) -> Result<Response<EnrollResponse>, Status> {
+
+        let req = req.into_inner();
+
+        // 1. Validate OTP (real store, single-use)
+        if !crate::otp::consume_otp(&req.enrollment_token) {
+            return Err(Status::permission_denied("invalid or expired OTP"));
+        }
+
+        // 2. Derive stable device ID
+        let device_id = derive_device_id(&req.device_pubkey);
+
+        // 3. Register device public key
+        self.state.devices.insert(device_id, req.device_pubkey);
+
+        tracing::info!("Device enrolled successfully");
+
+        Ok(Response::new(EnrollResponse { ok: true }))
+    }
+
     // --------------------------------------------------
     // Device registration (identity bootstrap)
     // --------------------------------------------------
@@ -57,6 +82,8 @@ impl Orchestrator for Service {
         let device_id = derive_device_id(&pubkey);
 
         self.state.devices.insert(device_id, pubkey.clone());
+
+        tracing::warn!("register_device is deprecated; use EnrollDevice");
 
         Ok(Response::new(Certificate { pem: pubkey }))
     }
@@ -184,8 +211,7 @@ pub async fn serve(
     );
 
     let tls = ServerTlsConfig::new()
-        .identity(server_identity)
-        .client_ca_root(client_ca);
+        .identity(server_identity);
 
     let mut builder = Server::builder();
 
@@ -233,7 +259,9 @@ impl Service {
             .map_err(|_| Status::internal("failed to start aggregator"))?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(job.to_string().as_bytes()).unwrap();
+            let payload = job.to_string();
+            stdin.write_all(payload.as_bytes())
+                .map_err(|_| Status::internal("failed to write to aggregator stdin"))?;
         }
 
         let output = child.wait_with_output()
