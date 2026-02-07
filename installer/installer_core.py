@@ -29,7 +29,7 @@ BASE_DIR = Path.home() / ".federated"
 STATE_FILE = BASE_DIR / "state" / "install_state.json"
 KEYS_DIR = BASE_DIR / "keys"
 
-SERVER_ADDR = "SERVER_IP:50051"
+SERVER_ADDR = "42.111.108.31:50051"
 INSTALLER_OTP = None
 
 def write_install_state():
