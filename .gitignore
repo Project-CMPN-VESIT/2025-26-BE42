@@ -1,13 +1,43 @@
-dementia/*
-LDA/app/pipelines/.env
-data/*
-labels/*
-plots/*
-opensmile/*
-secure_store/*
-receipts/*
-results/*
-decrypted_output/*
-trainer_outputs/mentalbert_privacy_subset.pt
-trainer_outputs/local_probe*
+############################
+# Python
+############################
+__pycache__/
+*.pyc
+*.pyo
+
+############################
+# Virtual environments
+############################
+venv/
+.venv/
+
+############################
+# Runtime outputs
+############################
+secure_store/
+receipts/
+processed/
+*.csv
+
+############################
+# Local binaries (DO NOT TRACK)
+############################
+LDA/OpenFace/
+
+############################
+# Tooling / package managers
+############################
+vcpkg/
+
+############################
+# Local machine configs
+############################
 configs/local_config.yaml
+
+############################
+# OS junk
+############################
+.DS_Store
+Thumbs.db
+
+installer/runtime/deps/windows/*

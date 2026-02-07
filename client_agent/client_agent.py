@@ -8,12 +8,21 @@ Autonomous UNTRUSTED client that:
         LDA -> Trainer -> DP -> Encryption
   - submits encrypted update metadata + receipt pointer
 """
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives import serialization
 
 import uuid
 import hashlib
 from pathlib import Path
 
 import grpc
+
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module="sklearn"
+)
 
 # -----------------------------
 # gRPC imports (generated)
@@ -29,11 +38,39 @@ from trainer_agent.trainer_mentalbert_privacy import orchestrate as trainer_orch
 from dp_agent.dp_agent import DPAgent
 from enc_agent.enc_agent import EncryptionAgent
 from centralized_secure_store import SecureStore
+from tempfile import NamedTemporaryFile
+import json
+
+from installer.security.integrity import integrity_guard
+integrity_guard()
+
+from installer.security.runtime_guard import enforce
+
+enforce()   # ← FIRST LINE
+
+
+KEY_PATH = Path("./device_key.pem")
+
+def load_or_create_keypair():
+    if KEY_PATH.exists():
+        return serialization.load_pem_private_key(
+            KEY_PATH.read_bytes(),
+            password=None,
+        )
+
+    key = ed25519.Ed25519PrivateKey.generate()
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    KEY_PATH.write_bytes(pem)
+    return key
 
 # -----------------------------
 # Config
 # -----------------------------
-ORCHESTRATOR_ADDR = "127.0.0.1:50051"
+ORCHESTRATOR_ADDR = "42.111.108.21:50051"
 CLIENT_ID_PATH = Path("./client_id.bin")
 SECURE_STORE_ROOT = Path("./secure_store")
 
@@ -45,26 +82,45 @@ VIDEO_DIR = "./videos"
 # -----------------------------
 # Helpers
 # -----------------------------
-def load_or_create_device_id() -> bytes:
-    if CLIENT_ID_PATH.exists():
-        return CLIENT_ID_PATH.read_bytes()
-    did = uuid.uuid4().bytes
-    CLIENT_ID_PATH.write_bytes(did)
-    return did
-
+def load_or_create_device_id(pubkey: bytes) -> bytes:
+    return hashlib.sha256(pubkey).digest()
 
 # -----------------------------
 # Main client flow
 # -----------------------------
 def run_client_once():
-    # ---- identity ----
-    device_id = load_or_create_device_id()
+    # --------------------------------------------------
+    # 0) Load / create device identity
+    # --------------------------------------------------
+    key = load_or_create_keypair()
+    pubkey = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    device_id = load_or_create_device_id(pubkey)
 
-    # ---- INSECURE gRPC channel (MATCHES RUST SERVER) ----
+    # --------------------------------------------------
+    # 1) gRPC channel + stub (MUST come before register)
+    # --------------------------------------------------
+    # creds = grpc.ssl_channel_credentials()
     channel = grpc.insecure_channel(ORCHESTRATOR_ADDR)
     stub = OrchestratorStub(channel)
 
-    # ---- query round ----
+    # --------------------------------------------------
+    # 2) Register device (ONCE per key)
+    # --------------------------------------------------
+    try:
+        stub.RegisterDevice(pb.CSR(device_pubkey=pubkey))
+        print("[client] device registered")
+    except grpc.RpcError as e:
+        if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+            print("[client] device already registered")
+        else:
+            raise
+
+    # --------------------------------------------------
+    # 3) Query round (now server recognizes device)
+    # --------------------------------------------------
     round_meta = stub.GetRound(pb.DeviceId(id=device_id))
     print(f"[client] round={round_meta.round_id} state={round_meta.state}")
 
@@ -87,12 +143,17 @@ def run_client_once():
     lda_result = preprocess(lda_req)
     print(lda_result)
 
+    # -----------------------------
+    # Materialize manifest for trainer
+    # -----------------------------
+    manifest_uri = lda_result["artifact_manifest"]
+
     # =====================================================
     # 2) Trainer
     # =====================================================
     print("[client] running trainer")
     trainer_out = trainer_orchestrate(
-        input_path=lda_result["artifact_manifest"],
+        input_path=manifest_uri,
         session_id=session_id,
         mode="supervised",
         epochs=1,
@@ -105,7 +166,7 @@ def run_client_once():
     # 3) Differential Privacy
     # =====================================================
     print("[client] running DP")
-    store = SecureStore(agent="client", root=SECURE_STORE_ROOT)
+    store = SecureStore(agent="trainer-agent", root=Path("./trainer_outputs/secure_store").resolve())
 
     dp_agent = DPAgent(
         clip_norm=1.0,
@@ -116,6 +177,7 @@ def run_client_once():
 
     dp_result = dp_agent.process_local_update(
         local_update_uri,
+        session_id=session_id,  
         metadata={"session_id": session_id},
     )
 
@@ -139,12 +201,20 @@ def run_client_once():
         final_update_uri.encode("utf-8")
     ).digest()
 
+    msg = (
+        device_id +
+        round_meta.round_id.to_bytes(8, "big") +
+        payload_hash
+    )
+
+    signature = key.sign(msg)
+
     receipt = pb.Receipt(
         device_id=device_id,
         round_id=round_meta.round_id,
         payload_hash=payload_hash,
         epsilon_spent=1.0,
-        signature=b"",          # server validates via receipt chain
+        signature=signature,          # server validates via receipt chain
         enc_uri=final_update_uri,
         scheme="AES-GCM",
         nonce="",

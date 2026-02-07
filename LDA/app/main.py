@@ -19,6 +19,8 @@ from LDA.app.pipelines.audio import process_audio_file
 from LDA.app.pipelines.text import process_text_file
 from LDA.app.pipelines.session_processor import process_session_file
 
+from installer.security.integrity import integrity_guard
+integrity_guard()
 
 class PreprocessRequest(BaseModel):
     mode: str  # "batch" | "interactive" | "continuous" | "session" | "text"
@@ -91,8 +93,11 @@ def preprocess(req: PreprocessRequest) -> Dict[str, Any]:
     """
     cfg = _load_config(req.config_uri)
     # create SecureStore with explicit named argument 'root'
-    store = SecureStore(root=cfg["storage"]["root"])
-    rm = CentralReceiptManager()
+    store = SecureStore(
+        agent="lda-session-processor",
+        root=Path(cfg["storage"]["root"]).resolve()
+    )
+    rm = CentralReceiptManager(agent="lda-session-processor")
 
     openface_bin = cfg["ingest"]["video"]["params"]["openface"]["binary_path"]
     haar_path = cfg["ingest"]["video"]["params"]["openface"].get("haar_path")
@@ -224,7 +229,7 @@ def preprocess(req: PreprocessRequest) -> Dict[str, Any]:
     manifest_uri = store.encrypt_write(f"file://{store.root / mrel}", manifest_bytes)
 
     final_receipt = rm.create_receipt(
-        agent="local-data-agent",
+        agent="lda-session-processor",
         session_id=session_id,
         operation="preprocess_complete",
         params={"mode": req.mode, "config_uri": req.config_uri},

@@ -665,6 +665,7 @@ dependencies = [
  "bytes",
  "dashmap",
  "ed25519-dalek",
+ "lazy_static",
  "prost",
  "rcgen",
  "serde",

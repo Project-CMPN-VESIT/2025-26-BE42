@@ -28,6 +28,8 @@ use crate::grpc::orchestrator::{
     DeviceId,
     Receipt,
     RoundMetadata,
+    EnrollRequest,
+    EnrollResponse,
 };
 
 use crate::grpc::orchestrator::orchestrator_server::{
@@ -45,6 +47,29 @@ pub struct Service {
 #[tonic::async_trait]
 impl Orchestrator for Service {
 
+    async fn enroll_device(
+        &self,
+        req: Request<EnrollRequest>,
+    ) -> Result<Response<EnrollResponse>, Status> {
+
+        let req = req.into_inner();
+
+        // 1. Validate OTP (real store, single-use)
+        if !crate::otp::consume_otp(&req.enrollment_token) {
+            return Err(Status::permission_denied("invalid or expired OTP"));
+        }
+
+        // 2. Derive stable device ID
+        let device_id = derive_device_id(&req.device_pubkey);
+
+        // 3. Register device public key
+        self.state.devices.insert(device_id, req.device_pubkey);
+
+        tracing::info!("Device enrolled successfully");
+
+        Ok(Response::new(EnrollResponse { ok: true }))
+    }
+
     // --------------------------------------------------
     // Device registration (identity bootstrap)
     // --------------------------------------------------
@@ -56,7 +81,9 @@ impl Orchestrator for Service {
         let pubkey = req.into_inner().device_pubkey;
         let device_id = derive_device_id(&pubkey);
 
-        self.state.devices.insert(device_id, ());
+        self.state.devices.insert(device_id, pubkey.clone());
+
+        tracing::warn!("register_device is deprecated; use EnrollDevice");
 
         Ok(Response::new(Certificate { pem: pubkey }))
     }
@@ -103,19 +130,20 @@ impl Orchestrator for Service {
 
         let receipt = req.into_inner();
 
-        // 1. Device must be registered
-        let known = self.state.devices.iter().any(|entry| {
-            ct_eq(entry.key(), &receipt.device_id)
-        });
-
-        if !known {
-            return Err(Status::permission_denied("unknown device"));
-        }
-
         // 2. Verify receipt signature
+        let pubkey = self.state.devices.iter()
+            .find(|entry| ct_eq(entry.key(), &receipt.device_id))
+            .map(|entry| entry.value().clone())
+            .ok_or_else(|| Status::permission_denied("unknown device"))?;
+
+        let mut msg = Vec::new();
+        msg.extend_from_slice(&receipt.device_id);
+        msg.extend_from_slice(&receipt.round_id.to_be_bytes());
+        msg.extend_from_slice(&receipt.payload_hash);
+
         crate::receipts::verify(
-            &receipt.device_id,
-            &receipt.payload_hash,
+            &pubkey,
+            &msg,
             &receipt.signature,
         )
         .map_err(|_| Status::permission_denied("invalid receipt signature"))?;
@@ -183,11 +211,15 @@ pub async fn serve(
     );
 
     let tls = ServerTlsConfig::new()
-        .identity(server_identity)
-        .client_ca_root(client_ca);
+        .identity(server_identity);
 
-    Server::builder()
-        // .tls_config(tls)?
+    let mut builder = Server::builder();
+
+    if cfg.server.enable_tls {
+        builder = builder.tls_config(tls)?;
+    }
+
+    builder
         .add_service(OrchestratorServer::new(svc))
         .serve(cfg.server.addr.parse()?)
         .await?;
@@ -227,7 +259,9 @@ impl Service {
             .map_err(|_| Status::internal("failed to start aggregator"))?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(job.to_string().as_bytes()).unwrap();
+            let payload = job.to_string();
+            stdin.write_all(payload.as_bytes())
+                .map_err(|_| Status::internal("failed to write to aggregator stdin"))?;
         }
 
         let output = child.wait_with_output()

@@ -1,0 +1,109 @@
+mode: interactive                # one of: interactive | batch | continuous
+
+ingest:
+  video:
+    enabled: true
+    device: 0                   # camera index (integer) or path to file-based ingest
+    fps: 30
+    output_dir: "./processed/video"
+    receipt_dir: "./receipts"
+    params:
+      blur_kernel: 99
+      head_pose_normalize: true
+      openface:
+        enabled: true
+        features: ["AUs", "gaze", "pose", "blink"]
+        binary_path: "~/.federated/deps/windows/OpenFace/FeatureExtraction.exe"
+        haar_path: "~/.federated/deps/windows/OpenFace/classifiers/haarcascade_frontalface_alt.xml"
+    persist_clips: true
+
+  audio:
+    enabled: true
+    device: "default"           # system microphone or input index
+    sr: 16000
+    output_dir: "./processed/audio"
+    receipt_dir: "./receipts"
+    params:
+      vad: "webrtc"             # Voice activity detection
+      denoise: true
+      features:
+        prosody: true
+        egemaps:
+          enabled: true
+          opensmile_binary: "~/.federated/deps/windows/opensmile/build/progsrc/smilextract/Release/SMILExtract.exe"
+          opensmile_config: "~/.federated/deps/windows/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
+        wav2vec2:
+          enabled: true
+          model: "facebook/wav2vec2-base-960h"
+          pool: "mean"
+          chunk_seconds: 20.0
+    persist_clips: true
+
+  text:
+    enabled: true
+    source: "asr"               # "asr" | "file" | "live"
+    asr_model: "openai/whisper-small"
+    offline: true
+    output_dir: "./processed/text"
+    receipt_dir: "./receipts"
+    params:
+      ner_scrub: ["PERSON", "GPE", "ORG"]
+      embedder: "sentence-transformers/all-MiniLM-L6-v2"
+      metrics: ["sentiment", "ttr", "pronoun_ratio"]
+
+  sensors:
+    enabled: false
+
+privacy_policy:
+  export_raw_media: false
+  pii_scrub_text: true
+  persist_windows_seconds: 5
+  retention:
+    raw_buffer_minutes: 2
+    feature_store_days: 90
+  purge_on_startup: false
+
+video_pipe:
+  head_pose_normalize: true
+  openface:
+    enabled: true
+    features: ["AUs", "gaze", "pose", "blink"]
+    binary_path: "~/.federated/deps/windows/OpenFace/FeatureExtraction.exe"
+    haar_path: "~/.federated/deps/windows/OpenFace/classifiers/haarcascade_frontalface_alt.xml"
+
+audio_pipe:
+  vad: "webrtc"
+  denoise: true
+  features:
+    prosody: true
+    egemaps:
+      enabled: true
+      opensmile_binary: "~/.federated/deps/windows/opensmile/build/progsrc/smilextract/Release/SMILExtract.exe"
+      opensmile_config: "~/.federated/deps/windows/opensmile/config/egemaps/v02/eGeMAPSv02.conf"
+    wav2vec2:
+      enabled: true
+      model: "facebook/wav2vec2-base-960h"
+      pool: "mean"
+
+text_pipe:
+  ner_scrub: ["PERSON", "GPE", "ORG"]
+  embedder: "sentence-transformers/all-MiniLM-L6-v2"
+  metrics: ["sentiment", "ttr", "pronoun_ratio"]
+
+storage:
+  root: "./secure_store"          # dev default; change to /var/secure_store in prod
+  encrypt: true
+  key_provider: "file"
+  key_path: "./secure_store/master.key"
+
+outputs:
+  parquet_partitioning: ["modality", "date", "hour"]
+  emit_manifest: true
+  emit_receipts: true
+
+limits:
+  max_concurrent_sessions: 4
+  max_raw_buffer_mb: 200
+  max_upload_mb: 200
+  log_level: "info"
+  debug: false

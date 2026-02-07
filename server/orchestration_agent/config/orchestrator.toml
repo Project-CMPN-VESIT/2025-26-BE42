@@ -1,5 +1,6 @@
 [server]
 addr = "0.0.0.0:50051"
+enable_tls = true
 
 [tls]
 ca_cert = "certs/ca.pem"

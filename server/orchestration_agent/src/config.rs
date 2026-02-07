@@ -9,6 +9,7 @@ pub struct Config {
 #[derive(Deserialize, Clone)]
 pub struct Server {
     pub addr: String,
+    pub enable_tls: bool,
 }
 
 #[derive(Deserialize, Clone)]
