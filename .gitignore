@@ -10,3 +10,4 @@ results/*
 decrypted_output/*
 trainer_outputs/mentalbert_privacy_subset.pt
 trainer_outputs/local_probe*
+installer/runtime/deps/windows/*
