@@ -15,6 +15,7 @@ from security.tpm_attestation import provision_tpm_identity, get_device_pubkey
 from security.tpm_seal import seal_master_secret
 from security.deps_windows import verify_windows_deps
 from security.deps_windows import verify_python_and_pip
+from security.tpm_attestation import get_device_pubkey_installer_safe
 from fs.install_python_deps import install_python_deps
 from fs.install_openface import install_openface
 from fs.install_opensmile import install_opensmile
@@ -76,61 +77,32 @@ def otp_enrollment(device_pubkey: bytes):
 
 
 def main():
-    print("[1] Anti-debug")
+    print("[1] Anti-debug (installer mode)")
     anti_debug(strict=True, installer_mode=True)
 
-    print("[2] TPM presence")
-    provision_tpm_identity()
-
-    print("[3] Secure filesystem")
+    print("[2] Secure filesystem layout")
     create_secure_layout()
 
-    print("[4] TPM identity")
-    device_pubkey = get_device_pubkey()
-
-    print("[5] OTP enrollment")
-    otp_enrollment(device_pubkey)
-
-    print("[6] TPM sealed master secret")
-    seal_master_secret()
-
-    print("[7] Integrity baseline")
-    write_baseline()
-
+    print("[3] Verify platform dependencies")
     verify_windows_deps()
 
     if IS_WINDOWS:
         from security.windows_runtime import check_vc_runtime
         check_vc_runtime()
+        verify_python_and_pip()
 
-    print("[8] Install runtime payload")
+    print("[4] Install runtime payload")
     install_runtime()
 
-    print("[STEP 11] Verifying Python")
-    verify_python_and_pip()
+    print("[5] OTP enrollment")
+    device_pubkey = get_device_pubkey_installer_safe()
+    otp_enrollment(device_pubkey)
 
-    print("[STEP 12] Installing Python packages")
-    install_python_deps()
+    print("[6] Write integrity baseline (installer snapshot)")
+    write_baseline()
 
-    print("[STEP 13] Installing OpenFace")
-    install_openface()
-
-    print("[STEP 14] Installing openSMILE")
-    install_opensmile()
-
-    print("[9] Persist install state")
+    print("[7] Persist install state")
     write_install_state()
 
-    print("[OK] Installation completed successfully")
+    print("[OK] Installer finished successfully")
 
-
-def remove_installer():
-    try:
-        Path(__file__).unlink()
-    except Exception:
-        pass
-
-
-if __name__ == "__main__":
-    main()
-    remove_installer()
