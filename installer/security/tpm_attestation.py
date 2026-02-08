@@ -133,3 +133,30 @@ def get_device_pubkey() -> bytes:
     if not PUBKEY_PEM.exists():
         sys.exit("[SECURITY] TPM identity not initialized")
     return PUBKEY_PEM.read_bytes()
+
+def get_device_pubkey_installer_safe() -> bytes:
+    """
+    Installer-safe public key access.
+    - Linux: reads TPM pubkey if already present
+    - Windows: uses placeholder keypair stored only for enrollment
+    """
+    system = platform.system().lower()
+
+    if system == "linux":
+        if PUBKEY_PEM.exists():
+            return PUBKEY_PEM.read_bytes()
+        sys.exit("[SECURITY] TPM identity not initialized. Run runtime once.")
+
+    elif system == "windows":
+        # TEMP enrollment key, NOT runtime identity
+        tmp = BASE_DIR / "state" / "installer_pubkey.bin"
+        if tmp.exists():
+            return tmp.read_bytes()
+
+        key = secrets.token_bytes(32)
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(key)
+        return key
+
+    else:
+        sys.exit("[SECURITY] Unsupported OS")
