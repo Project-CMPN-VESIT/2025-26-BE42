@@ -1,6 +1,6 @@
 import os
 import stat
-import hashlib
+import platform
 from pathlib import Path
 
 FEDERATED_DIR = Path.home() / ".federated"
@@ -16,33 +16,49 @@ SUBDIRS = [
     "data/cache",
     "logs",
     "integrity",
+    "deps/windows",
 ]
 
 def _chmod_owner_only(path: Path):
+    # Linux / macOS only
     if os.name == "posix":
-        path.chmod(stat.S_IRWXU)  # 700
+        path.chmod(stat.S_IRWXU)
 
 def create_secure_layout():
-    if FEDERATED_DIR.exists():
-        raise RuntimeError("[SECURITY] .federated already exists")
+    system = platform.system().lower()
+    print(f"[FS] Creating secure layout at {FEDERATED_DIR}")
 
-    FEDERATED_DIR.mkdir(mode=0o700)
-    _chmod_owner_only(FEDERATED_DIR)
+    # --------------------------------------------------
+    # 1. Create root safely
+    # --------------------------------------------------
+    if not FEDERATED_DIR.exists():
+        FEDERATED_DIR.mkdir(parents=True, exist_ok=True)
+        _chmod_owner_only(FEDERATED_DIR)
+    else:
+        print("[FS] .federated already exists (continuing)")
 
+    # --------------------------------------------------
+    # 2. Create subdirectories
+    # --------------------------------------------------
     for sub in SUBDIRS:
         p = FEDERATED_DIR / sub
         p.mkdir(parents=True, exist_ok=True)
         _chmod_owner_only(p)
 
-    # install lock (used later for anti-tamper)
+    # --------------------------------------------------
+    # 3. Install lock (idempotent)
+    # --------------------------------------------------
     lock = FEDERATED_DIR / "state" / "install.lock"
-    lock.write_text("installed")
-    _chmod_owner_only(lock)
+    if not lock.exists():
+        lock.write_text("installed")
+        _chmod_owner_only(lock)
 
-    # integrity baseline placeholder
+    # --------------------------------------------------
+    # 4. Integrity baseline placeholder
+    # --------------------------------------------------
     baseline = FEDERATED_DIR / "integrity" / "baseline.sha256"
-    baseline.write_text("")  # filled in Step 4
-    _chmod_owner_only(baseline)
+    if not baseline.exists():
+        baseline.write_text("")
+        _chmod_owner_only(baseline)
 
-    print("[OK] Secure .federated layout created")
-
+    print("[FS] Secure filesystem layout created")
