@@ -13,6 +13,10 @@ PRIMARY_CTX = TPM_DIR / "primary.ctx"
 DEVICE_CTX = TPM_DIR / "device.ctx"
 PUBKEY_PEM = TPM_DIR / "device_pubkey.pem"
 
+
+# --------------------------------------------------
+# Public entry
+# --------------------------------------------------
 def tpm_attestation():
     system = platform.system().lower()
 
@@ -23,16 +27,14 @@ def tpm_attestation():
     else:
         sys.exit("[SECURITY] Unsupported OS for TPM attestation")
 
+
+# --------------------------------------------------
+# Linux TPM checks
+# --------------------------------------------------
 def _linux_tpm_check():
-    # -----------------------------
-    # 1. TPM device presence
-    # -----------------------------
     if not os.path.exists("/sys/class/tpm/tpm0"):
         sys.exit("[SECURITY] TPM not found")
 
-    # -----------------------------
-    # 2. TPM command availability
-    # -----------------------------
     try:
         subprocess.run(
             ["tpm2_getcap", "properties-fixed"],
@@ -43,16 +45,15 @@ def _linux_tpm_check():
     except Exception:
         sys.exit("[SECURITY] TPM tools not available or TPM blocked")
 
-    # -----------------------------
-    # 3. Generate hardware-bound nonce
-    # -----------------------------
     nonce = secrets.token_bytes(32)
     digest = hashlib.sha256(nonce).hexdigest()
-
-    # Store temporarily in memory only
     if not digest:
         sys.exit("[SECURITY] TPM entropy failure")
 
+
+# --------------------------------------------------
+# Windows TPM presence check ONLY
+# --------------------------------------------------
 def _windows_tpm_check():
     try:
         import winreg
@@ -61,9 +62,14 @@ def _windows_tpm_check():
             r"SYSTEM\CurrentControlSet\Services\TPM"
         )
         winreg.CloseKey(key)
+        print("[TPM] Windows TPM detected")
     except Exception:
         sys.exit("[SECURITY] TPM not found or disabled on Windows")
 
+
+# --------------------------------------------------
+# Linux-only provisioning
+# --------------------------------------------------
 def _run(cmd):
     subprocess.run(
         cmd,
@@ -72,11 +78,20 @@ def _run(cmd):
         stderr=subprocess.DEVNULL
     )
 
+
 def provision_tpm_identity():
-    """
-    Creates a TPM-resident, non-exportable device identity.
-    Runs only once. Safe to re-run.
-    """
+    system = platform.system().lower()
+
+    # ------------------------------
+    # Windows: DO NOT provision
+    # ------------------------------
+    if system == "windows":
+        print("[TPM] Skipping TPM provisioning on Windows (runtime enforced)")
+        return
+
+    # ------------------------------
+    # Linux provisioning
+    # ------------------------------
     TPM_DIR.mkdir(parents=True, exist_ok=True)
 
     if not os.path.exists("/sys/class/tpm/tpm0"):
@@ -121,7 +136,6 @@ def provision_tpm_identity():
         "-f", "pem"
     ])
 
-    # Cleanup temp files
     for f in ["device.pub", "device.priv"]:
         p = TPM_DIR / f
         if p.exists():
@@ -129,32 +143,32 @@ def provision_tpm_identity():
 
     print("[TPM] TPM-backed identity created")
 
+
+# --------------------------------------------------
+# Public key access
+# --------------------------------------------------
 def get_device_pubkey() -> bytes:
     if not PUBKEY_PEM.exists():
         sys.exit("[SECURITY] TPM identity not initialized")
     return PUBKEY_PEM.read_bytes()
 
+
 def get_device_pubkey_installer_safe() -> bytes:
-    """
-    Installer-safe public key access.
-    - Linux: reads TPM pubkey if already present
-    - Windows: uses placeholder keypair stored only for enrollment
-    """
     system = platform.system().lower()
 
     if system == "linux":
         if PUBKEY_PEM.exists():
             return PUBKEY_PEM.read_bytes()
-        sys.exit("[SECURITY] TPM identity not initialized. Run runtime once.")
+        sys.exit("[SECURITY] TPM identity not initialized")
 
     elif system == "windows":
-        # TEMP enrollment key, NOT runtime identity
         tmp = BASE_DIR / "state" / "installer_pubkey.bin"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+
         if tmp.exists():
             return tmp.read_bytes()
 
         key = secrets.token_bytes(32)
-        tmp.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_bytes(key)
         return key
 
