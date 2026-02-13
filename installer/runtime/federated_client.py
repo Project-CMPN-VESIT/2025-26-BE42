@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE))
 
 import hashlib
 import sys
@@ -23,7 +28,7 @@ def main():
     device_id = hashlib.sha256(device_pubkey).digest()
 
     # 3. Secure channel
-    SERVER_ADDR = "server-address:50051"  # replaced by installer
+    SERVER_ADDR = "tcp://0.tcp.in.ngrok.io:13085"  # replaced by installer
     stub = create_grpc_stub(SERVER_ADDR)
 
     # 4. Idempotent registration

@@ -36,8 +36,8 @@ from transformers import AutoModel, AutoTokenizer, AdamW
 import pandas as pd
 import pyarrow.parquet as pq
 
-from centralized_secure_store import SecureStore
-from centralised_receipts import CentralReceiptManager
+from core.centralized_secure_store import SecureStore
+from core.centralised_receipts import CentralReceiptManager
 
 from installer.security.integrity import integrity_guard
 integrity_guard()

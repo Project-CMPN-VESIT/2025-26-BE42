@@ -8,8 +8,8 @@ import torchaudio
 from pathlib import Path
 from typing import Dict, Any, List
 
-from centralized_secure_store import SecureStore
-from centralised_receipts import CentralReceiptManager
+from core.centralized_secure_store import SecureStore
+from core.centralised_receipts import CentralReceiptManager
 
 
 def _extract_wav2vec2_features(wav_path: str, model_id: str, pool: str, max_dim: int) -> Dict[str, Any]:

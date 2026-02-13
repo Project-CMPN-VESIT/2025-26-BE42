@@ -10,14 +10,14 @@ import pyarrow.parquet as pq
 from datetime import datetime
 
 # 👇 centralized imports
-from centralized_secure_store import SecureStore
-from centralised_receipts import CentralReceiptManager
+from core.centralized_secure_store import SecureStore
+from core.centralised_receipts import CentralReceiptManager
 
 # local pipelines
-from LDA.app.pipelines.video import process_video_file
-from LDA.app.pipelines.audio import process_audio_file
-from LDA.app.pipelines.text import process_text_file
-from LDA.app.pipelines.session_processor import process_session_file
+from agents.lda.pipelines.video import process_video_file
+from agents.lda.pipelines.audio import process_audio_file
+from agents.lda.pipelines.text import process_text_file
+from agents.lda.pipelines.session_processor import process_session_file
 
 from installer.security.integrity import integrity_guard
 integrity_guard()

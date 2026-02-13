@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Dict, Any
 import json
 
-from centralized_secure_store import SecureStore
-from centralised_receipts import CentralReceiptManager
+from core.centralized_secure_store import SecureStore
+from core.centralised_receipts import CentralReceiptManager
 
 
 class VideoProcessor:

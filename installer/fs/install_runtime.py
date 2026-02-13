@@ -150,6 +150,17 @@ def install_runtime():
 
     _chmod_tree(runtime_dst)
 
+    # 6. core shared modules
+    core_src = RUNTIME_SRC / "core"
+    core_dst = BASE_DIR / "core"
+
+    if core_src.exists():
+        if core_dst.exists():
+            shutil.rmtree(core_dst)
+
+        shutil.copytree(core_src, core_dst)
+        _chmod_tree(core_dst)
+
     # 6. Windows native dependencies (OpenFace + openSMILE)
     install_windows_deps()
 

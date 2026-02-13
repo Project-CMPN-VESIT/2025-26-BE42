@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 # 👇 centralized receipts + secure store
-from centralised_receipts import CentralReceiptManager
-from centralized_secure_store import SecureStore
+from core.centralised_receipts import CentralReceiptManager
+from core.centralized_secure_store import SecureStore
 
 from installer.security.integrity import integrity_guard
 integrity_guard()
