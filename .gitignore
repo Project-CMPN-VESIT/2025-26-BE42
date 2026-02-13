@@ -44,3 +44,5 @@ installer/runtime/deps/windows/*
 installer/FederatedInstaller.spec
 installer/build/
 installer/dist/
+
+data/*
