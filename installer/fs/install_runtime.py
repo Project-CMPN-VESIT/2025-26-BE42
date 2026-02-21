@@ -164,8 +164,11 @@ def install_runtime():
     # 6. Windows native dependencies (OpenFace + openSMILE)
     install_windows_deps()
 
-    print("[STEP] Validating runtime dependencies")
-    validate_deps()
+    if platform.system().lower() == "windows":
+        print("[STEP] Validating runtime dependencies")
+        validate_deps()
+    else:
+        print("[INFO] Skipping Windows dependency validation (Linux mode)")
 
     # 5. validation helper
     shutil.copy2(

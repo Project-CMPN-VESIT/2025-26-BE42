@@ -1,5 +1,4 @@
 use p256::ecdsa::{VerifyingKey, Signature, signature::Verifier};
-use sha2::{Sha256, Digest};
 use crate::errors::OrchestratorError;
 
 pub fn verify(

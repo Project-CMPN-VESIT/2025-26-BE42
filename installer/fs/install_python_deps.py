@@ -12,12 +12,7 @@ def install_python_deps():
     print("[STEP 5] Installing Python dependencies")
 
     subprocess.run(
-        ["pip", "install", "--upgrade", "pip"],
-        check=True
-    )
-
-    subprocess.run(
-        ["pip", "install", "-r", str(REQ_FILE)],
+        [sys.executable, "-m", "pip", "install", "-r", str(REQ_FILE)],
         check=True
     )
 

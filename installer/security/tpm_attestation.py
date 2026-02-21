@@ -101,16 +101,16 @@ def provision_tpm_identity():
         print("[TPM] Device identity already provisioned")
         return
 
-    print("[TPM] Creating primary key")
-    # Create ECC primary key
+    print("[TPM] Creating ECC primary key")
     _run([
         "tpm2_createprimary",
         "-C", "o",
         "-G", "ecc",
+        "-g", "sha256",
         "-c", str(PRIMARY_CTX)
     ])
 
-    # Create ECC signing key (P-256)
+    print("[TPM] Creating ECC device signing key")
     _run([
         "tpm2_create",
         "-C", str(PRIMARY_CTX),
@@ -121,7 +121,7 @@ def provision_tpm_identity():
         "-a", "sign|fixedtpm|fixedparent|sensitivedataorigin|userwithauth"
     ])
 
-    print("[TPM] Loading device key")
+    print("[TPM] Loading ECC device key")
     _run([
         "tpm2_load",
         "-C", str(PRIMARY_CTX),
@@ -130,20 +130,13 @@ def provision_tpm_identity():
         "-c", str(DEVICE_CTX)
     ])
 
-    print("[TPM] Exporting public key")
+    print("[TPM] Exporting public key (PEM)")
     _run([
         "tpm2_readpublic",
         "-c", str(DEVICE_CTX),
-        "-o", str(PUBKEY_PEM),
-        "-f", "pem"
+        "-f", "pem",
+        "-o", str(PUBKEY_PEM)
     ])
-
-    for f in ["device.pub", "device.priv"]:
-        p = TPM_DIR / f
-        if p.exists():
-            p.unlink()
-
-    print("[TPM] TPM-backed identity created")
 
 
 # --------------------------------------------------

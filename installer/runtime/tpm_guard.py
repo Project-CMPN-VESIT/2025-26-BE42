@@ -13,9 +13,6 @@ TPM_DIR = BASE_DIR / "tpm"
 PUBKEY_PEM = TPM_DIR / "device_pubkey.pem"
 
 def sign_message(message: bytes) -> bytes:
-    if IS_WINDOWS:
-        # Windows TPM signing handled server-side
-        return b""
     try:
         proc = subprocess.run(
             [

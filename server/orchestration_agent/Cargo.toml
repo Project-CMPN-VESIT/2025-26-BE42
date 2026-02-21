@@ -16,7 +16,6 @@ dashmap = "5.5"
 sha2 = "0.10"
 p256 = { version = "0.13", features = ["ecdsa"] }
 ecdsa = { version = "0.16", features = ["pem"] }
-sha2 = "0.10"
 pkcs8 = "0.10"
 bytes = "1.6"
 uuid = { version = "1.8", features = ["v4"] }
