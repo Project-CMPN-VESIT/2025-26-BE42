@@ -85,7 +85,8 @@ fn sign_stdin() -> Result<()> {
             NCRYPT_FLAGS(0),
         )?;
 
-        std::io::stdout().write_all(&signature)?;
+        let der = encode_der_ecdsa(&signature);
+        std::io::stdout().write_all(&der)?;
     }
 
     Ok(())
@@ -123,4 +124,38 @@ fn export_public_key() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn encode_der_ecdsa(rs: &[u8]) -> Vec<u8> {
+    assert_eq!(rs.len(), 64);
+
+    fn encode_int(bytes: &[u8]) -> Vec<u8> {
+        let mut v = bytes.to_vec();
+
+        // strip leading zeros
+        while v.len() > 1 && v[0] == 0 {
+            v.remove(0);
+        }
+
+        // if high bit set → prepend 0x00
+        if v[0] & 0x80 != 0 {
+            let mut prefixed = vec![0u8];
+            prefixed.extend(v);
+            v = prefixed;
+        }
+
+        let mut out = vec![0x02, v.len() as u8];
+        out.extend(v);
+        out
+    }
+
+    let r = encode_int(&rs[0..32]);
+    let s = encode_int(&rs[32..64]);
+
+    let total_len = r.len() + s.len();
+    let mut der = vec![0x30, total_len as u8];
+    der.extend(r);
+    der.extend(s);
+
+    der
 }
