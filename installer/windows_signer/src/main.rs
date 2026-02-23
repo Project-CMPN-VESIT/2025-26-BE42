@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use windows::core::*;
 use windows::Win32::Security::Cryptography::*;
 use sha2::{Sha256, Digest};
+use base64::Engine;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
