@@ -19,6 +19,7 @@ fn open_or_create_key() -> Result<NCRYPT_KEY_HANDLE> {
     unsafe {
         let mut provider = NCRYPT_PROV_HANDLE::default();
 
+        // Use TPM-backed provider
         NCryptOpenStorageProvider(
             &mut provider,
             w!("Microsoft Platform Crypto Provider"),
@@ -27,28 +28,50 @@ fn open_or_create_key() -> Result<NCRYPT_KEY_HANDLE> {
 
         let mut key = NCRYPT_KEY_HANDLE::default();
 
-        let open_result = NCryptOpenKey(
+        // Try open with MACHINE scope
+        let open = NCryptOpenKey(
             provider,
             &mut key,
             w!("FederatedDeviceKey"),
             CERT_KEY_SPEC(0),
-            NCRYPT_FLAGS(0),
+            NCRYPT_MACHINE_KEY_FLAG,
         );
 
-        if open_result.is_err() {
-            NCryptCreatePersistedKey(
-                provider,
-                &mut key,
-                w!("ECDSA_P256"),
-                w!("FederatedDeviceKey"),
-                CERT_KEY_SPEC(0),
-                NCRYPT_MACHINE_KEY_FLAG,
-            )?;
-
-            NCryptFinalizeKey(key, NCRYPT_FLAGS(0))?;
+        if open.is_ok() {
+            return Ok(key);
         }
 
-        Ok(key)
+        // Try create
+        let create = NCryptCreatePersistedKey(
+            provider,
+            &mut key,
+            w!("ECDSA_P256"),
+            w!("FederatedDeviceKey"),
+            CERT_KEY_SPEC(0),
+            NCRYPT_MACHINE_KEY_FLAG,
+        );
+
+        match create {
+            Ok(_) => {
+                NCryptFinalizeKey(key, NCRYPT_FLAGS(0))?;
+                return Ok(key);
+            }
+            Err(e) => {
+                // If key already exists, try opening again
+                if e.code().0 as u32 == 0x8009000F {
+                    NCryptOpenKey(
+                        provider,
+                        &mut key,
+                        w!("FederatedDeviceKey"),
+                        CERT_KEY_SPEC(0),
+                        NCRYPT_MACHINE_KEY_FLAG,
+                    )?;
+                    return Ok(key);
+                } else {
+                    return Err(e);
+                }
+            }
+        }
     }
 }
 
