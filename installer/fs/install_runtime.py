@@ -4,6 +4,9 @@ import platform
 from pathlib import Path
 import sys
 from runtime.validate_deps import main as validate_deps
+import platform
+
+IS_WINDOWS = platform.system().lower() == "windows"
 
 BASE_DIR = Path.home() / ".federated"
 
@@ -175,5 +178,11 @@ def install_runtime():
         RUNTIME_SRC / "validate_deps.py",
         BASE_DIR / "runtime" / "validate_deps.py"
     )
+
+    if IS_WINDOWS:
+        shutil.copy2(
+            RUNTIME_SRC / "windows_signer.exe",
+            BASE_DIR / "bin" / "windows_signer.exe"
+        )
 
     print("[OK] Runtime installed successfully")
