@@ -5,6 +5,7 @@ import json
 import grpc
 import platform
 from pathlib import Path
+import subprocess
 
 # -------------------------
 # Filesystem & runtime
@@ -45,13 +46,18 @@ BASE_DIR = Path.home() / ".federated"
 STATE_FILE = BASE_DIR / "state" / "install_state.json"
 KEYS_DIR = BASE_DIR / "keys"
 
-SERVER_ADDR = "tcp://0.tcp.in.ngrok.io:18852"
 INSTALLER_OTP = None
 
 
 # --------------------------------------------------
 # Helpers
 # --------------------------------------------------
+def get_server_addr():
+    addr = input("Enter server address (host:port): ").strip()
+    if not addr:
+        sys.exit("[SECURITY] Server address required")
+    return addr
+
 def write_install_state():
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(
@@ -70,31 +76,67 @@ def write_install_state():
 def otp_enrollment(device_pubkey: bytes):
     global INSTALLER_OTP
 
+    import subprocess
+
     token = INSTALLER_OTP or input("Enter enrollment OTP: ").strip()
 
     if len(token) < 6:
         sys.exit("[SECURITY] Invalid OTP")
 
+    KEYS_DIR.mkdir(parents=True, exist_ok=True)
+
+    client_key = KEYS_DIR / "client.key"
+    client_csr = KEYS_DIR / "client.csr"
+
+    # 1. Generate private key
+    subprocess.run([
+        "openssl", "genrsa",
+        "-out", str(client_key),
+        "2048"
+    ], check=True)
+
+    # 2. Generate CSR
+    subprocess.run([
+        "openssl", "req",
+        "-new",
+        "-key", str(client_key),
+        "-out", str(client_csr),
+        "-subj", "/CN=federated-device"
+    ], check=True)
+
+    SERVER_ADDR = get_server_addr()
+
+    # 3. Create secure channel (server TLS only)
     channel = grpc.secure_channel(
         SERVER_ADDR,
         grpc.ssl_channel_credentials(
             root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
         ),
+        options=(
+            ('grpc.ssl_target_name_override', 'localhost'),
+        )
     )
 
     stub = OrchestratorStub(channel)
 
+    # 4. Send enrollment request with CSR
     resp = stub.EnrollDevice(
         EnrollRequest(
             enrollment_token=token,
             device_pubkey=device_pubkey,
+            csr=client_csr.read_bytes(),
         )
     )
 
     if not resp.ok:
         sys.exit("[SECURITY] Enrollment failed")
 
-    print("[OK] Device enrolled")
+    # 5. Store signed certificate
+    client_cert_path = KEYS_DIR / "client.pem"
+    client_cert_path.write_bytes(resp.client_cert)
+    client_cert_path.chmod(0o600)
+
+    print("[OK] Device enrolled + client certificate installed")
 
 
 # --------------------------------------------------

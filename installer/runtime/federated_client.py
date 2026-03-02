@@ -7,6 +7,7 @@ sys.path.insert(0, str(BASE))
 
 import hashlib
 import sys
+import os
 
 from runtime.runtime_guard import runtime_guard
 from runtime.grpc_client import create_grpc_stub
@@ -28,7 +29,11 @@ def main():
     device_id = hashlib.sha256(device_pubkey).digest()
 
     # 3. Secure channel
-    SERVER_ADDR = "tcp://0.tcp.in.ngrok.io:18852"  # replaced by installer
+    SERVER_ADDR = os.environ.get("FED_SERVER")
+
+    if not SERVER_ADDR:
+        SERVER_ADDR = input("Enter server address (host:port): ").strip()
+
     stub = create_grpc_stub(SERVER_ADDR)
 
     # 4. Idempotent registration

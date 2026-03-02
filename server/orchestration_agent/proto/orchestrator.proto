@@ -51,8 +51,10 @@ message Ack {
 message EnrollRequest {
   string enrollment_token = 1;
   bytes device_pubkey = 2;
+  bytes csr = 3;
 }
 
 message EnrollResponse {
   bool ok = 1;
+  bytes client_cert = 2;
 }

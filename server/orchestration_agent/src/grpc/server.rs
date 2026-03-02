@@ -48,26 +48,64 @@ pub struct Service {
 impl Orchestrator for Service {
 
     async fn enroll_device(
-        &self,
-        req: Request<EnrollRequest>,
-    ) -> Result<Response<EnrollResponse>, Status> {
+    &self,
+    req: Request<EnrollRequest>,
+) -> Result<Response<EnrollResponse>, Status> {
+
+        use std::fs;
+        use std::process::Command;
+        use std::io::Write;
+        use tempfile::NamedTempFile;
 
         let req = req.into_inner();
 
-        // 1. Validate OTP (real store, single-use)
+        // 1. Validate OTP
         if !crate::otp::consume_otp(&req.enrollment_token) {
             return Err(Status::permission_denied("invalid or expired OTP"));
         }
 
-        // 2. Derive stable device ID
+        // 2. Store TPM pubkey
         let device_id = derive_device_id(&req.device_pubkey);
+        self.state.devices.insert(device_id, req.device_pubkey.clone());
 
-        // 3. Register device public key
-        self.state.devices.insert(device_id, req.device_pubkey);
+        // 3. Write CSR to temp file
+        let mut csr_file = NamedTempFile::new()
+            .map_err(|_| Status::internal("failed to create temp CSR file"))?;
 
-        tracing::info!("Device enrolled successfully");
+        csr_file.write_all(&req.csr)
+            .map_err(|_| Status::internal("failed to write CSR"))?;
 
-        Ok(Response::new(EnrollResponse { ok: true }))
+        let cert_file = NamedTempFile::new()
+            .map_err(|_| Status::internal("failed to create temp cert file"))?;
+
+        // 4. Sign CSR using OpenSSL + CA
+        let output = Command::new("openssl")
+            .arg("x509")
+            .arg("-req")
+            .arg("-in").arg(csr_file.path())
+            .arg("-CA").arg(&self.cfg.tls.ca_cert)
+            .arg("-CAkey").arg(&self.cfg.tls.ca_key)
+            .arg("-CAcreateserial")
+            .arg("-out").arg(cert_file.path())
+            .arg("-days").arg("365")
+            .arg("-sha256")
+            .output()
+            .map_err(|_| Status::internal("failed to execute openssl"))?;
+
+        if !output.status.success() {
+            return Err(Status::internal("openssl CSR signing failed"));
+        }
+
+        // 5. Read signed certificate
+        let signed_cert = fs::read(cert_file.path())
+            .map_err(|_| Status::internal("failed to read signed cert"))?;
+
+        tracing::info!("Device enrolled + client cert issued");
+
+        Ok(Response::new(EnrollResponse {
+            ok: true,
+            client_cert: signed_cert,
+        }))
     }
 
     // --------------------------------------------------
@@ -211,13 +249,14 @@ pub async fn serve(
     );
 
     let tls = ServerTlsConfig::new()
-        .identity(server_identity);
+        .identity(server_identity)
+        .client_ca_root(client_ca);
 
     let mut builder = Server::builder();
 
-    if cfg.server.enable_tls {
-        builder = builder.tls_config(tls)?;
-    }
+    println!("[DEBUG] TLS is being configured");
+    builder = builder.tls_config(tls)?;
+    println!("[DEBUG] TLS forced ON");
 
     builder
         .add_service(OrchestratorServer::new(svc))

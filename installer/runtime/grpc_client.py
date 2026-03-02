@@ -9,10 +9,18 @@ BASE = Path.home() / ".federated"
 def create_grpc_stub(server_addr: str):
     try:
         creds = grpc.ssl_channel_credentials(
-            root_certificates=(BASE / "keys" / "ca.pem").read_bytes()
+            root_certificates=(BASE / "keys" / "ca.pem").read_bytes(),
+            private_key=(BASE / "keys" / "client.key").read_bytes(),
+            certificate_chain=(BASE / "keys" / "client.pem").read_bytes(),
         )
 
-        channel = grpc.secure_channel(server_addr, creds)
+        channel = grpc.secure_channel(
+            server_addr,
+            creds,
+            options=(
+                ('grpc.ssl_target_name_override', 'localhost'),
+            )
+        )
         stub = OrchestratorStub(channel)
 
         # Attach TPM-backed signer dynamically
