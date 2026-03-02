@@ -47,17 +47,12 @@ STATE_FILE = BASE_DIR / "state" / "install_state.json"
 KEYS_DIR = BASE_DIR / "keys"
 
 INSTALLER_OTP = None
+INSTALLER_SERVER_ADDR = None
 
 
 # --------------------------------------------------
 # Helpers
 # --------------------------------------------------
-def get_server_addr():
-    addr = input("Enter server address (host:port): ").strip()
-    if not addr:
-        sys.exit("[SECURITY] Server address required")
-    return addr
-
 def write_install_state():
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(
@@ -73,14 +68,12 @@ def write_install_state():
     STATE_FILE.chmod(0o600)
 
 
-def otp_enrollment(device_pubkey: bytes):
+def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
     print("[DEBUG] Entered otp_enrollment()")
     print("[DEBUG] KEYS_DIR =", KEYS_DIR)
     global INSTALLER_OTP
 
     import subprocess
-
-    token = INSTALLER_OTP or input("Enter enrollment OTP: ").strip()
 
     if len(token) < 6:
         sys.exit("[SECURITY] Invalid OTP")
@@ -106,7 +99,7 @@ def otp_enrollment(device_pubkey: bytes):
         "-subj", "/CN=federated-device"
     ], check=True)
 
-    SERVER_ADDR = get_server_addr()
+    SERVER_ADDR = server_addr
 
     # 3. Create secure channel (server TLS only)
     channel = grpc.secure_channel(
@@ -205,7 +198,7 @@ def main():
     # 10. OTP enrollment (server is running)
     # --------------------------------------------------
     print("[10] OTP enrollment")
-    otp_enrollment(device_pubkey)
+    otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
 
     # --------------------------------------------------
     # 11. Seal master secret

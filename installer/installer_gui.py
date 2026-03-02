@@ -25,6 +25,10 @@ class InstallerGUI:
         self.otp_entry = tk.Entry(root, width=40)
         self.otp_entry.pack(pady=5)
 
+        tk.Label(root, text="Server Address (host:port)").pack()
+        self.server_entry = tk.Entry(root, width=40)
+        self.server_entry.pack(pady=5)
+
         self.start_btn = tk.Button(
             root,
             text="Install",
@@ -51,18 +55,23 @@ class InstallerGUI:
 
     def start_install(self):
         otp = self.otp_entry.get().strip()
+        server = self.server_entry.get().strip()
         if len(otp) < 6:
             messagebox.showerror("Error", "Invalid OTP")
+            return
+
+        if not server:
+            messagebox.showerror("Error", "Server address required")
             return
 
         self.start_btn.config(state="disabled")
         threading.Thread(
             target=self.run_installer,
-            args=(otp,),
+            args=(otp, server),
             daemon=True
         ).start()
 
-    def run_installer(self, otp):
+    def run_installer(self, otp, server):
         # Redirect stdout
         buffer = io.StringIO()
         sys.stdout = buffer
@@ -70,6 +79,7 @@ class InstallerGUI:
 
         try:
             installer_core.INSTALLER_OTP = otp
+            installer_core.INSTALLER_SERVER_ADDR = server
             installer_core.main()
             self.root.after(
                 0,
