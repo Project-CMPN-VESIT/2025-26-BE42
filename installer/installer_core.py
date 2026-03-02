@@ -74,6 +74,8 @@ def write_install_state():
 
 
 def otp_enrollment(device_pubkey: bytes):
+    print("[DEBUG] Entered otp_enrollment()")
+    print("[DEBUG] KEYS_DIR =", KEYS_DIR)
     global INSTALLER_OTP
 
     import subprocess
