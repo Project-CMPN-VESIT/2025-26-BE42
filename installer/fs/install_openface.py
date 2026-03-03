@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 BASE = Path.home() / ".federated"
-DST = BASE / "deps" / "OpenFace"
+DST = BASE / "deps" / "windows" / "OpenFace"
 
 def get_installer_root() -> Path:
     if getattr(sys, 'frozen', False):

@@ -188,12 +188,18 @@ def main():
     # --------------------------------------------------
     # 7. Native ML dependencies
     # --------------------------------------------------
-    print("[7] Installing OpenFace")
-    install_openface()
+    if not IS_WINDOWS:
+        print("[7] Installing OpenFace")
+        install_openface()
+    else:
+        print("[7] Windows OpenFace already bundled")
 
-    print("[8] Installing openSMILE")
-    install_opensmile()
-
+    if not IS_WINDOWS:
+        print("[8] Installing openSMILE")
+        install_opensmile()
+    else:
+        print("[8] Windows opensmile already bundled")
+        
     # --------------------------------------------------
     # 9. VERIFY dependencies (NOW they exist)
     # --------------------------------------------------
