@@ -7,8 +7,6 @@ import io
 # import your existing installer
 import installer_core
 
-print("INSTALLER CORE FILE:", installer_core.__file__)
-
 
 class InstallerGUI:
     def __init__(self, root):
@@ -75,6 +73,7 @@ class InstallerGUI:
 
     def run_installer(self, otp, server):
         # Redirect stdout
+        print("INSTALLER CORE FILE:", installer_core.__file__)
         buffer = io.StringIO()
         sys.stdout = buffer
         sys.stderr = buffer
