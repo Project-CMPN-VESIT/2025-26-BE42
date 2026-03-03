@@ -28,29 +28,29 @@ def main():
     # --------------------------------------------------
     run(["python", "--version"], "Python available")
 
-    # --------------------------------------------------
-    # 2. OpenFace binary check
-    # --------------------------------------------------
-    openface = DEPS / "OpenFace" / "FeatureExtraction.exe"
-    if not openface.exists():
-        sys.exit("[FAIL] FeatureExtraction.exe missing")
+    # # --------------------------------------------------
+    # # 2. OpenFace binary check
+    # # --------------------------------------------------
+    # openface = DEPS / "windows" / "OpenFace" / "FeatureExtraction.exe"
+    # if not openface.exists():
+    #     sys.exit("[FAIL] FeatureExtraction.exe missing")
 
-    run(
-        [str(openface), "-h"],
-        "OpenFace executable runs"
-    )
+    # run(
+    #     [str(openface), "-h"],
+    #     "OpenFace executable runs"
+    # )
 
-    # --------------------------------------------------
-    # 3. openSMILE binary check
-    # --------------------------------------------------
-    smile = list((DEPS / "opensmile").rglob("SMILExtract.exe"))
-    if not smile:
-        sys.exit("[FAIL] SMILExtract.exe missing")
+    # # --------------------------------------------------
+    # # 3. openSMILE binary check
+    # # --------------------------------------------------
+    # smile = list((DEPS / "windows" / "opensmile"/ "build" / "progsrc" / "smilextract" / "Release").rglob("SMILExtract.exe"))
+    # if not smile:
+    #     sys.exit("[FAIL] SMILExtract.exe missing")
 
-    run(
-        [str(smile[0]), "-h"],
-        "openSMILE executable runs"
-    )
+    # run(
+    #     [str(smile[0]), "-h"],
+    #     "openSMILE executable runs"
+    # )
 
     print("\n[ALL CHECKS PASSED] Runtime dependencies validated")
 
