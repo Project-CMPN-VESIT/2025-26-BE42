@@ -9,6 +9,7 @@ import platform
 IS_WINDOWS = platform.system().lower() == "windows"
 
 BASE_DIR = Path.home() / ".federated"
+KEYS_DIR = Path.home() / ".federated" / "keys"
 
 def get_installer_root() -> Path:
     """
@@ -188,6 +189,24 @@ def install_runtime():
         validate_deps()
     else:
         print("[INFO] Skipping Windows dependency validation (Linux mode)")
+
+    if getattr(sys, 'frozen', False):
+        base = Path(sys._MEIPASS)
+    else:
+        base = Path(__file__).resolve().parent
+
+    ca_src = base / "runtime" / "keys" / "ca.pem"
+    ca_dst = KEYS_DIR / "ca.pem"
+
+    print("[DEBUG] CA source:", ca_src)
+    print("[DEBUG] CA source exists:", ca_src.exists())
+    print("[DEBUG] CA destination:", ca_dst)
+
+    if not ca_src.exists():
+        raise RuntimeError("CA certificate missing from installer runtime")
+
+    shutil.copy2(ca_src, ca_dst)
+    print("[OK] CA certificate installed")   
 
     # 5. validation helper
     shutil.copy2(
