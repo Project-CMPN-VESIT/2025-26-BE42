@@ -72,16 +72,15 @@ class InstallerGUI:
         ).start()
 
     def run_installer(self, otp, server):
-        # Redirect stdout
         print("INSTALLER CORE FILE:", installer_core.__file__)
+
         buffer = io.StringIO()
         sys.stdout = buffer
         sys.stderr = buffer
 
         try:
-            installer_core.INSTALLER_OTP = otp
-            installer_core.INSTALLER_SERVER_ADDR = server
-            installer_core.main()
+            installer_core.main(otp, server)
+
             self.root.after(
                 0,
                 lambda: messagebox.showinfo(
@@ -89,6 +88,7 @@ class InstallerGUI:
                     "Installation completed successfully"
                 )
             )
+
         except SystemExit as e:
             self.root.after(
                 0,
@@ -97,6 +97,7 @@ class InstallerGUI:
                     str(e)
                 )
             )
+
         finally:
             sys.stdout = sys.__stdout__
             sys.stderr = sys.__stderr__

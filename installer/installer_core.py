@@ -75,12 +75,15 @@ def write_install_state():
 
 
 def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
+    print("[DEBUG] OTP received by installer:", token)
     print("[DEBUG] SERVER_ADDR =", server_addr)
     print("[DEBUG] CA exists:", (KEYS_DIR / "ca.pem").exists())
     print("[DEBUG] About to create gRPC channel")
     global INSTALLER_OTP
 
     import subprocess
+
+    token = token.strip()
 
     if len(token) < 6:
         sys.exit("[SECURITY] Invalid OTP")
@@ -171,7 +174,14 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
 # --------------------------------------------------
 # Main installer
 # --------------------------------------------------
-def main():
+def main(otp=None, server_addr=None):
+
+    global INSTALLER_OTP
+    global INSTALLER_SERVER_ADDR
+
+    INSTALLER_OTP = otp
+    INSTALLER_SERVER_ADDR = server_addr
+    
     print("=== BUILD VERSION 2 WITH GUI INPUT FIX ===")
     # --------------------------------------------------
     # 1. Anti-debug (installer mode)
