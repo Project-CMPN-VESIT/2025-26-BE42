@@ -57,12 +57,16 @@ def _linux_tpm_check():
 # --------------------------------------------------
 def _windows_tpm_check():
     try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Services\TPM"
+        subprocess.run(
+            [
+                "powershell",
+                "-Command",
+                "Get-Tpm"
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
         )
-        winreg.CloseKey(key)
         print("[TPM] Windows TPM detected")
     except Exception:
         sys.exit("[SECURITY] TPM not found or disabled on Windows")
@@ -159,15 +163,31 @@ def get_device_pubkey_installer_safe() -> bytes:
         sys.exit("[SECURITY] TPM identity not initialized")
 
     elif system == "windows":
-        tmp = BASE_DIR / "state" / "installer_pubkey.bin"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
 
-        if tmp.exists():
-            return tmp.read_bytes()
+        signer = BASE_DIR / "bin" / "windows_signer.exe"
+        pubkey_file = TPM_DIR / "device_pubkey.pem"
 
-        key = secrets.token_bytes(32)
-        tmp.write_bytes(key)
-        return key
+        TPM_DIR.mkdir(parents=True, exist_ok=True)
+
+        if pubkey_file.exists():
+            return pubkey_file.read_bytes()
+
+        print("[TPM] Initializing Windows TPM key")
+
+        subprocess.run(
+            [str(signer), "--init"],
+            check=True
+        )
+
+        subprocess.run(
+            [str(signer), "--pubkey", str(pubkey_file)],
+            check=True
+        )
+
+        if not pubkey_file.exists():
+            sys.exit("[SECURITY] Failed to obtain TPM public key")
+
+        return pubkey_file.read_bytes()
 
     else:
         sys.exit("[SECURITY] Unsupported OS")

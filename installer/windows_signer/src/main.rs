@@ -7,13 +7,93 @@ use base64::Engine;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() > 1 && args[1] == "--export-pub" {
-        export_public_key()?;
-        return Ok(());
+    if args.len() > 1 {
+
+        // initialize TPM key
+        if args[1] == "--init" {
+            open_or_create_key()?;
+            println!("[TPM] Windows TPM key initialized");
+            return Ok(());
+        }
+
+        // export public key to file
+        if args[1] == "--pubkey" {
+            if args.len() < 3 {
+                eprintln!("Usage: windows_signer --pubkey <file>");
+                std::process::exit(1);
+            }
+
+            let pem = export_public_key_bytes()?;
+            std::fs::write(&args[2], pem)?;
+            return Ok(());
+        }
+
+        // compatibility with previous flag
+        if args[1] == "--export-pub" {
+            export_public_key()?;
+            return Ok(());
+        }
     }
 
+    // default mode → sign stdin
     sign_stdin()?;
     Ok(())
+}
+
+fn export_public_key_bytes() -> Result<Vec<u8>> {
+    unsafe {
+        let key = open_or_create_key()?;
+
+        let mut len = 0u32;
+
+        NCryptExportKey(
+            key,
+            None,
+            w!("PUBLICBLOB"),
+            None,
+            None,
+            &mut len,
+            NCRYPT_FLAGS(0),
+        )?;
+
+        let mut buf = vec![0u8; len as usize];
+
+        NCryptExportKey(
+            key,
+            None,
+            w!("PUBLICBLOB"),
+            None,
+            Some(&mut buf),
+            &mut len,
+            NCRYPT_FLAGS(0),
+        )?;
+
+        let x = &buf[8..40];
+        let y = &buf[40..72];
+
+        let mut ec_point = vec![0x04];
+        ec_point.extend(x);
+        ec_point.extend(y);
+
+        let spki_prefix: [u8; 26] = [
+            0x30, 0x59,
+            0x30, 0x13,
+            0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
+            0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07,
+            0x03, 0x42, 0x00
+        ];
+
+        let mut spki = Vec::new();
+        spki.extend(spki_prefix);
+        spki.extend(ec_point);
+
+        let pem = format!(
+            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+            base64::engine::general_purpose::STANDARD.encode(spki)
+        );
+
+        Ok(pem.into_bytes())
+    }
 }
 
 fn open_or_create_key() -> Result<NCRYPT_KEY_HANDLE> {
