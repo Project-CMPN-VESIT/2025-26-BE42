@@ -259,8 +259,16 @@ def main(otp=None, server_addr=None):
     # --------------------------------------------------
     # 11. Seal master secret
     # --------------------------------------------------
-    print("[11] Sealing master secret")
-    seal_master_secret()
+    if IS_WINDOWS:
+        print("[11] Initializing TPM signer (Windows CNG)")
+        subprocess.run(
+            [str(BASE_DIR / "bin" / "windows_signer.exe"), "--init"],
+            check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+    else:
+        print("[11] Sealing master secret")
+        seal_master_secret()
 
     # --------------------------------------------------
     # 12. Integrity baseline
