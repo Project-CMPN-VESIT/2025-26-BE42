@@ -13,7 +13,7 @@ mod otp;
 use crate::config::Config;
 use crate::state::OrchestratorState;
 
-use crate::otp::add_otp;
+use crate::otp::generate_otp;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     // --------------------------------------------------
     // 4. DEV ONLY: bootstrap enrollment OTP
     // --------------------------------------------------
-    let otp = "123456";
+    let otp = crate::otp::generate_otp();
     state.enrollment_tokens.insert(otp.to_string(), ());
     println!("[DEV] Enrollment OTP enabled: {}", otp);
 
