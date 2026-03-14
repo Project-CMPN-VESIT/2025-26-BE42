@@ -257,15 +257,10 @@ def main(otp=None, server_addr=None):
     otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
 
     # --------------------------------------------------
-    # 11. Seal master secret
+    # 11. TPM identity already initialized earlier
     # --------------------------------------------------
     if IS_WINDOWS:
-        print("[11] Initializing TPM signer (Windows CNG)")
-        subprocess.run(
-            [str(BASE_DIR / "bin" / "windows_signer.exe"), "--init"],
-            check=True,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
+        print("[11] Windows TPM signer already initialized")
     else:
         print("[11] Sealing master secret")
         seal_master_secret()

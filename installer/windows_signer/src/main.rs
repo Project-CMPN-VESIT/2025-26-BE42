@@ -9,14 +9,12 @@ fn main() -> Result<()> {
 
     if args.len() > 1 {
 
-        // initialize TPM key
         if args[1] == "--init" {
             open_or_create_key()?;
             println!("[TPM] Windows TPM key initialized");
             return Ok(());
         }
 
-        // export public key to file
         if args[1] == "--pubkey" {
             if args.len() < 3 {
                 eprintln!("Usage: windows_signer --pubkey <file>");
@@ -28,18 +26,16 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        // compatibility with previous flag
-        if args[1] == "--export-pub" {
-            export_public_key()?;
+        if args[1] == "--sign" {
+            sign_stdin()?;
             return Ok(());
         }
     }
 
-    // default mode → sign stdin
-    eprintln!("windows_signer requires arguments:");
+    eprintln!("windows_signer usage:");
     eprintln!("  --init");
     eprintln!("  --pubkey <file>");
-    eprintln!("  (signing mode used only by runtime)");
+    eprintln!("  --sign");
 
     std::process::exit(1);
 }
