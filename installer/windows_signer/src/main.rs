@@ -7,37 +7,42 @@ use base64::Engine;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() > 1 {
+    if args.len() < 2 {
+        eprintln!("Usage:");
+        eprintln!("  windows_signer --init");
+        eprintln!("  windows_signer --pubkey <file>");
+        eprintln!("  windows_signer --sign");
+        std::process::exit(1);
+    }
 
-        if args[1] == "--init" {
+    match args[1].as_str() {
+
+        "--init" => {
             open_or_create_key()?;
             println!("[TPM] Windows TPM key initialized");
-            return Ok(());
         }
 
-        if args[1] == "--pubkey" {
+        "--pubkey" => {
             if args.len() < 3 {
-                eprintln!("Usage: windows_signer --pubkey <file>");
+                eprintln!("Missing output file");
                 std::process::exit(1);
             }
 
             let pem = export_public_key_bytes()?;
             std::fs::write(&args[2], pem)?;
-            return Ok(());
         }
 
-        if args[1] == "--sign" {
+        "--sign" => {
             sign_stdin()?;
-            return Ok(());
+        }
+
+        _ => {
+            eprintln!("Unknown command");
+            std::process::exit(1);
         }
     }
 
-    eprintln!("windows_signer usage:");
-    eprintln!("  --init");
-    eprintln!("  --pubkey <file>");
-    eprintln!("  --sign");
-
-    std::process::exit(1);
+    Ok(())
 }
 
 fn export_public_key_bytes() -> Result<Vec<u8>> {
