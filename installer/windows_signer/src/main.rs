@@ -96,16 +96,17 @@ fn export_public_key_bytes() -> Result<Vec<u8>> {
             "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
             base64::engine::general_purpose::STANDARD.encode(spki)
         );
-
+        
+        NCryptFreeObject(key);
         Ok(pem.into_bytes())
     }
 }
 
 fn open_or_create_key() -> Result<NCRYPT_KEY_HANDLE> {
     unsafe {
+
         let mut provider = NCRYPT_PROV_HANDLE::default();
 
-        // Use TPM-backed provider
         NCryptOpenStorageProvider(
             &mut provider,
             w!("Microsoft Platform Crypto Provider"),
@@ -114,50 +115,32 @@ fn open_or_create_key() -> Result<NCRYPT_KEY_HANDLE> {
 
         let mut key = NCRYPT_KEY_HANDLE::default();
 
-        // Try open with MACHINE scope
-        let open = NCryptOpenKey(
+        if NCryptOpenKey(
             provider,
             &mut key,
             w!("FederatedDeviceKey"),
-            CERT_KEY_SPEC(0),
+            0,
             NCRYPT_MACHINE_KEY_FLAG,
-        );
-
-        if open.is_ok() {
+        ).is_ok()
+        {
+            NCryptFreeObject(provider);
             return Ok(key);
         }
 
-        // Try create
-        let create = NCryptCreatePersistedKey(
+        NCryptCreatePersistedKey(
             provider,
             &mut key,
             w!("ECDSA_P256"),
             w!("FederatedDeviceKey"),
-            CERT_KEY_SPEC(0),
+            0,
             NCRYPT_MACHINE_KEY_FLAG,
-        );
+        )?;
 
-        match create {
-            Ok(_) => {
-                NCryptFinalizeKey(key, NCRYPT_FLAGS(0))?;
-                return Ok(key);
-            }
-            Err(e) => {
-                // If key already exists, try opening again
-                if e.code().0 as u32 == 0x8009000F {
-                    NCryptOpenKey(
-                        provider,
-                        &mut key,
-                        w!("FederatedDeviceKey"),
-                        CERT_KEY_SPEC(0),
-                        NCRYPT_MACHINE_KEY_FLAG,
-                    )?;
-                    return Ok(key);
-                } else {
-                    return Err(e);
-                }
-            }
-        }
+        NCryptFinalizeKey(key, NCRYPT_FLAGS(0))?;
+
+        NCryptFreeObject(provider);
+
+        Ok(key)
     }
 }
 
@@ -196,71 +179,7 @@ fn sign_stdin() -> Result<()> {
 
         let der = encode_der_ecdsa(&signature);
         std::io::stdout().write_all(&der)?;
-    }
-
-    Ok(())
-}
-
-fn export_public_key() -> Result<()> {
-    unsafe {
-        let key = open_or_create_key()?;
-
-        let mut len = 0u32;
-
-        NCryptExportKey(
-            key,
-            None,
-            w!("PUBLICBLOB"),
-            None,
-            None,
-            &mut len,
-            NCRYPT_FLAGS(0),
-        )?;
-
-        let mut buf = vec![0u8; len as usize];
-
-        NCryptExportKey(
-            key,
-            None,
-            w!("PUBLICBLOB"),
-            None,
-            Some(&mut buf),
-            &mut len,
-            NCRYPT_FLAGS(0),
-        )?;
-
-        // PUBLICBLOB structure:
-        // BCRYPT_ECCPUBLIC_BLOB header (8 bytes)
-        // then X (32 bytes)
-        // then Y (32 bytes)
-
-        let x = &buf[8..40];
-        let y = &buf[40..72];
-
-        // Uncompressed EC point format
-        let mut ec_point = vec![0x04];
-        ec_point.extend(x);
-        ec_point.extend(y);
-
-        // ASN.1 header for P-256 SPKI
-        let spki_prefix: [u8; 26] = [
-            0x30, 0x59,
-            0x30, 0x13,
-            0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01,
-            0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07,
-            0x03, 0x42, 0x00
-        ];
-
-        let mut spki = Vec::new();
-        spki.extend(spki_prefix);
-        spki.extend(ec_point);
-
-        let pem = format!(
-            "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
-            base64::engine::general_purpose::STANDARD.encode(spki)
-        );
-
-        println!("{}", pem);
+        NCryptFreeObject(key);
     }
 
     Ok(())
