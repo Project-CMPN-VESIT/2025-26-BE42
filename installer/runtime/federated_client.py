@@ -39,7 +39,8 @@ def main():
     # 4. Idempotent registration
     try:
         stub.RegisterDevice(
-            stub._request_serializer.CSR(device_pubkey=device_pubkey)
+            stub._request_serializer.CSR(device_pubkey=device_pubkey),
+            timeout=10
         )
     except Exception:
         pass

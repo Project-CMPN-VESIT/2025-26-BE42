@@ -110,7 +110,7 @@ def run_client_once():
     # 2) Register device (ONCE per key)
     # --------------------------------------------------
     try:
-        stub.RegisterDevice(pb.CSR(device_pubkey=pubkey))
+        stub.RegisterDevice(pb.CSR(device_pubkey=pubkey), timeout=10)
         print("[client] device registered")
     except grpc.RpcError as e:
         if e.code() == grpc.StatusCode.ALREADY_EXISTS:

@@ -32,7 +32,7 @@ def run_pipeline(stub, device_id: bytes, master_secret: bytes):
     # --------------------------------------------------
     # 1) Query round
     # --------------------------------------------------
-    round_meta = stub.GetRound(DeviceId(id=device_id))
+    round_meta = stub.GetRound(DeviceId(id=device_id), timeout=10)
 
     if round_meta.state != "Collecting":
         return
@@ -122,4 +122,4 @@ def run_pipeline(stub, device_id: bytes, master_secret: bytes):
         nonce="",
     )
 
-    stub.SubmitReceipt(receipt)
+    stub.SubmitReceipt(receipt, timeout=10)
