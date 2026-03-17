@@ -178,7 +178,13 @@ def get_device_pubkey_installer_safe() -> bytes:
         if pubkey_file.exists():
             return pubkey_file.read_bytes()
 
-        print("[TPM] Running signer init...")
+        print("[TPM] Step 1: entering TPM provisioning")
+
+        print("[TPM] Step 2: checking signer path")
+        print("[TPM] signer:", signer)
+        print("[TPM] exists:", signer.exists())
+
+        print("[TPM] Step 3: running --init")
 
         proc = subprocess.Popen(
             [str(signer), "--init"],
@@ -191,9 +197,9 @@ def get_device_pubkey_installer_safe() -> bytes:
 
         proc.wait(timeout=10)
 
-        print("[TPM] Signer init completed")
+        print("[TPM] Step 4: init DONE")
 
-        print("[TPM] Exporting public key...")
+        print("[TPM] Step 5: running --pubkey")
 
         proc = subprocess.Popen(
             [str(signer), "--pubkey", str(pubkey_file)],
@@ -212,8 +218,10 @@ def get_device_pubkey_installer_safe() -> bytes:
 
         if proc.returncode != 0:
             raise RuntimeError(f"TPM pubkey export failed: {proc.returncode}")
+        
+        print("[TPM] Step 6: pubkey DONE")
 
-        print("[TPM] Public key export finished")
+        print("[TPM] Step 7: reading pubkey file")
 
         if not pubkey_file.exists():
             sys.exit("[SECURITY] Failed to obtain TPM public key")
