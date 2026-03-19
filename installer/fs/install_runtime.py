@@ -61,6 +61,9 @@ def install_windows_deps():
     dst = dst_root / "windows"
 
     print("🔥🔥🔥 NEW CODE EXECUTED 🔥🔥🔥")
+    print("[DEBUG] RUNTIME_SRC:", RUNTIME_SRC)
+    print("[DEBUG] Contents:", list((RUNTIME_SRC / "deps").iterdir()))
+    
     # 🔥 Ensure clean state
     if dst.exists():
         shutil.rmtree(dst)
