@@ -205,15 +205,14 @@ def install_runtime():
     ca_src = base / "runtime" / "keys" / "ca.pem"
     ca_dst = KEYS_DIR / "ca.pem"
 
-    print("[DEBUG] CA source:", ca_src)
-    print("[DEBUG] CA source exists:", ca_src.exists())
-    print("[DEBUG] CA destination:", ca_dst)
+    # 🔥 ensure keys dir exists
+    KEYS_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not ca_src.exists():
-        raise RuntimeError("CA certificate missing from installer runtime")
+    print("[DEBUG] Creating keys directory:", KEYS_DIR)
 
     shutil.copy2(ca_src, ca_dst)
-    print("[OK] CA certificate installed")   
+
+    print("[OK] CA certificate installed") 
 
     # 5. validation helper
     shutil.copy2(
