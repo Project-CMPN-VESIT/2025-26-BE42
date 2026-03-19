@@ -132,14 +132,15 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
     )
 
+    print("🔥 STEP 10: STARTING ENROLLMENT 🔥")
+
     channel = grpc.secure_channel(
         SERVER_ADDR,
-        creds,
-        options=[
-            ('grpc.ssl_target_name_override', 'localhost'),
-            ('grpc.default_authority', 'localhost'),
-        ]
+        creds
     )
+
+    # 🔥 ensure TLS handshake happens immediately
+    grpc.channel_ready_future(channel).result(timeout=10)
 
     stub = OrchestratorStub(channel)
 
@@ -156,6 +157,7 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
             ),
             timeout=10
         )
+        print("🔥 STEP 10: ENROLLMENT COMPLETED 🔥")
     except Exception as e:
         print("[ERROR] gRPC failed:", e)
         raise

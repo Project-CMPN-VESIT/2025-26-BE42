@@ -16,11 +16,12 @@ def create_grpc_stub(server_addr: str):
 
         channel = grpc.secure_channel(
             server_addr,
-            creds,
-            options=(
-                ('grpc.ssl_target_name_override', 'localhost'),
-            )
+            creds
         )
+
+        # 🔥 ensure connection works
+        grpc.channel_ready_future(channel).result(timeout=10)
+
         stub = OrchestratorStub(channel)
 
         # Attach TPM-backed signer dynamically
