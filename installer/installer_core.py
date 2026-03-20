@@ -139,8 +139,12 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         creds
     )
 
-    # 🔥 ensure TLS handshake happens immediately
+    print("[DEBUG] Waiting for channel ready...")
+
+    import grpc
     grpc.channel_ready_future(channel).result(timeout=10)
+
+    print("[DEBUG] Channel READY ✅")    
 
     stub = OrchestratorStub(channel)
 
