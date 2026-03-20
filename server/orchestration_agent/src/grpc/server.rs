@@ -229,16 +229,6 @@ impl Orchestrator for Service {
 
         Ok(Response::new(Ack { ok: true }))
     }
-
-    fn require_client_cert<T>(req: &Request<T>) -> Result<(), Status> {
-        let certs = req.peer_certs();
-
-        if certs.is_none() {
-            return Err(Status::unauthenticated("client certificate required"));
-        }
-
-        Ok(())
-    }
 }
 
 // --------------------------------------------------
@@ -263,15 +253,11 @@ pub async fn serve(
         std::fs::read(&cfg.tls.ca_cert)?,
     );
 
-    let mut tls = ServerTlsConfig::new()
-        .identity(server_identity);
+    let tls = ServerTlsConfig::new()
+        .identity(server_identity)
+        .client_ca_root(client_ca);
 
-    if cfg.server.require_client_cert {
-        println!("[TLS] mTLS ENABLED (client cert required)");
-        tls = tls.client_ca_root(client_ca);
-    } else {
-        println!("[TLS] TLS only (enrollment mode)");
-    }
+    println!("[TLS] mTLS ENABLED (selective enforcement)");
     
     let mut builder = Server::builder();
 
@@ -293,6 +279,15 @@ pub async fn serve(
 // Aggregation trigger (control-plane → worker)
 // --------------------------------------------------
 impl Service {
+    fn require_client_cert<T>(req: &Request<T>) -> Result<(), Status> {
+        let certs = req.peer_certs();
+
+        if certs.is_none() {
+            return Err(Status::unauthenticated("client certificate required"));
+        }
+
+        Ok(())
+    }
 
     fn run_aggregation(&self, round_id: u64) -> Result<(), Status> {
 

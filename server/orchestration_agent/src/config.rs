@@ -17,8 +17,7 @@ pub struct Tls {
 #[derive(Deserialize, Clone)]
 pub struct Server {
     pub addr: String,
-    pub enable_tls: bool,
-    pub require_client_cert: bool, // 👈 ADD THIS
+    pub enable_tls: bool
 }
 
 impl Config {
