@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 import sys
 from pathlib import Path
-from runtime.grpc.orchestrator_pb2 import CSR
-BASE = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BASE))
+
+BASE = Path(__file__).resolve().parent.parent
+
+if str(BASE) not in sys.path:
+    sys.path.insert(0, str(BASE))
+
+print("[DEBUG] PYTHONPATH =", sys.path[:3])
 
 import hashlib
 import sys
 import os
-
+from runtime.grpc.orchestrator_pb2 import CSR
 from runtime.runtime_guard import runtime_guard
 from runtime.grpc_client import create_grpc_stub
 from runtime.pipeline import run_pipeline
