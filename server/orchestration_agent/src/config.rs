@@ -7,17 +7,18 @@ pub struct Config {
 }
 
 #[derive(Deserialize, Clone)]
-pub struct Server {
-    pub addr: String,
-    pub enable_tls: bool,
-}
-
-#[derive(Deserialize, Clone)]
 pub struct Tls {
     pub ca_cert: String,
     pub ca_key: String,
     pub server_cert: String,
     pub server_key: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Server {
+    pub addr: String,
+    pub enable_tls: bool,
+    pub require_client_cert: bool, // 👈 ADD THIS
 }
 
 impl Config {

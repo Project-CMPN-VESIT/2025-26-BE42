@@ -134,15 +134,22 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
 
     print("🔥 STEP 10: STARTING ENROLLMENT 🔥")
 
+    host = SERVER_ADDR.split(":")[0]
+
     channel = grpc.secure_channel(
         SERVER_ADDR,
-        creds
+        creds,
+        options=[
+            ('grpc.ssl_target_name_override', host),
+            ('grpc.default_authority', host),
+        ]
     )
 
     print("[DEBUG] Waiting for channel ready...")
 
-    import grpc
     grpc.channel_ready_future(channel).result(timeout=10)
+
+    print("[DEBUG] Channel READY ✅")
 
     print("[DEBUG] Channel READY ✅")    
 

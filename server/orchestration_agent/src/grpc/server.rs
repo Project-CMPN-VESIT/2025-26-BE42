@@ -248,10 +248,16 @@ pub async fn serve(
         std::fs::read(&cfg.tls.ca_cert)?,
     );
 
-    let tls = ServerTlsConfig::new()
-        .identity(server_identity)
-        .client_ca_root(client_ca);
+    let mut tls = ServerTlsConfig::new()
+        .identity(server_identity);
 
+    if cfg.server.require_client_cert {
+        println!("[TLS] mTLS ENABLED (client cert required)");
+        tls = tls.client_ca_root(client_ca);
+    } else {
+        println!("[TLS] TLS only (enrollment mode)");
+    }
+    
     let mut builder = Server::builder();
 
     println!("[DEBUG] TLS is being configured");
