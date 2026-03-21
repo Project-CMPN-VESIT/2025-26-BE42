@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
-sys.stdout.reconfigure(line_buffering=True)
+
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 
 import json
 import grpc
