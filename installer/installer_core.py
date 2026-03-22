@@ -62,6 +62,20 @@ INSTALLER_SERVER_ADDR = None
 # --------------------------------------------------
 # Helpers
 # --------------------------------------------------
+import logging
+from pathlib import Path
+
+LOG_FILE = Path.home() / ".federated" / "logs" / "installer.log"
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    filename=str(LOG_FILE),
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+logging.info("Installer started")
+
 def write_install_state():
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(
@@ -78,10 +92,10 @@ def write_install_state():
 
 
 def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
-    print("[DEBUG] OTP received by installer:", token)
-    print("[DEBUG] SERVER_ADDR =", server_addr)
-    print("[DEBUG] CA exists:", (KEYS_DIR / "ca.pem").exists())
-    print("[DEBUG] About to create gRPC channel")
+    logging.info("[DEBUG] OTP received by installer:", token)
+    logging.info("[DEBUG] SERVER_ADDR =", server_addr)
+    logging.info("[DEBUG] CA exists:", (KEYS_DIR / "ca.pem").exists())
+    logging.info("[DEBUG] About to create gRPC channel")
     global INSTALLER_OTP
 
     import subprocess
@@ -135,7 +149,7 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
     )
 
-    print("🔥 STEP 10: STARTING ENROLLMENT 🔥")
+    logging.info("🔥 STEP 10: STARTING ENROLLMENT 🔥")
 
     host = SERVER_ADDR.split(":")[0]
 
@@ -148,21 +162,21 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         ]
     )
 
-    print("[DEBUG] Waiting for channel ready...")
+    logging.info("[DEBUG] Waiting for channel ready...")
 
     grpc.channel_ready_future(channel).result(timeout=10)
 
-    print("[DEBUG] Channel READY ✅")
+    logging.info("[DEBUG] Channel READY ✅")
 
-    print("[DEBUG] Channel READY ✅")    
+    logging.info("[DEBUG] Channel READY ✅")    
 
     stub = OrchestratorStub(channel)
 
-    print("[DEBUG] gRPC channel created")
+    logging.info("[DEBUG] gRPC channel created")
 
     # 4. Send enrollment request with CSR
     try:
-        print("[DEBUG] Sending EnrollDevice RPC")
+        logging.info("[DEBUG] Sending EnrollDevice RPC")
         resp = stub.EnrollDevice(
             EnrollRequest(
                 enrollment_token=token,
@@ -171,9 +185,9 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
             ),
             timeout=10
         )
-        print("🔥 STEP 10: ENROLLMENT COMPLETED 🔥")
+        logging.info("🔥 STEP 10: ENROLLMENT COMPLETED 🔥")
     except Exception as e:
-        print("[ERROR] gRPC failed:", e)
+        logging.info("[ERROR] gRPC failed:", e)
         raise
 
     if not resp.ok:
@@ -184,17 +198,17 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
     client_cert_path.write_bytes(resp.client_cert)
     client_cert_path.chmod(0o600)
 
-    print("[OK] Device enrolled + client certificate installed")
+    logging.info("[OK] Device enrolled + client certificate installed")
 
 def create_venv():
     BASE = Path.home() / ".federated"
     VENV_DIR = BASE / "venv"
 
     if VENV_DIR.exists():
-        print("[OK] venv already exists")
+        logging.info("[OK] venv already exists")
         return
 
-    print("[STEP] Creating virtual environment")
+    logging.info("[STEP] Creating virtual environment")
 
     # 🔥 Find real python (NOT PyInstaller exe)
     python_cmd = "python"
@@ -214,7 +228,7 @@ def create_venv():
         check=True
     )
 
-    print("[OK] venv created")
+    logging.info("[OK] venv created")
 
 # --------------------------------------------------
 # Main installer
@@ -227,29 +241,29 @@ def main(otp=None, server_addr=None):
     INSTALLER_OTP = otp
     INSTALLER_SERVER_ADDR = server_addr
     
-    print("=== BUILD VERSION 2 WITH GUI INPUT FIX ===")
+    logging.info("=== BUILD VERSION 2 WITH GUI INPUT FIX ===")
     # --------------------------------------------------
     # 1. Anti-debug (installer mode)
     # --------------------------------------------------
-    print("[1] Anti-debug (installer mode)")
+    logging.info("[1] Anti-debug (installer mode)")
     anti_debug(strict=True, installer_mode=True)
 
     # --------------------------------------------------
     # 2. Secure filesystem layout
     # --------------------------------------------------
-    print("[2] Secure filesystem layout")
+    logging.info("[2] Secure filesystem layout")
     create_secure_layout()
 
     # --------------------------------------------------
     # 3. Runtime payload (code + configs)
     # --------------------------------------------------
-    print("[3] Installing runtime payload")
+    logging.info("[3] Installing runtime payload")
     install_runtime()
     
     # --------------------------------------------------
     # 4. TPM identity (safe for installer)
     # --------------------------------------------------
-    print("[4] TPM identity provisioning")
+    logging.info("[4] TPM identity provisioning")
     provision_tpm_identity()
     device_pubkey = get_device_pubkey_installer_safe()
 
@@ -259,7 +273,7 @@ def main(otp=None, server_addr=None):
     # 5. Windows runtime prerequisites
     # --------------------------------------------------
     if IS_WINDOWS:
-        print("[5] Verifying Python & VC runtime")
+        logging.info("[5] Verifying Python & VC runtime")
         from security.windows_runtime import check_vc_runtime
 
         check_vc_runtime()
@@ -270,65 +284,65 @@ def main(otp=None, server_addr=None):
     # --------------------------------------------------
     # 6. Python dependencies
     # --------------------------------------------------
-    print("[6] Installing Python dependencies")
+    logging.info("[6] Installing Python dependencies")
     try:
         install_python_deps()
-        print("[DEBUG] Python deps installed")
+        logging.info("[DEBUG] Python deps installed")
     except Exception as e:
-        print("[ERROR] install_python_deps crashed:", e)
+        logging.info("[ERROR] install_python_deps crashed:", e)
         raise
 
-    print("🔥 DEPS DONE → MOVING TO ENROLLMENT", flush=True)
+    logging.info("🔥 DEPS DONE → MOVING TO ENROLLMENT", flush=True)
 
     # --------------------------------------------------
     # 7. Native ML dependencies
     # --------------------------------------------------
     if not IS_WINDOWS:
-        print("[7] Installing OpenFace")
+        logging.info("[7] Installing OpenFace")
         install_openface()
     else:
-        print("[7] Windows OpenFace already bundled")
+        logging.info("[7] Windows OpenFace already bundled")
 
     if not IS_WINDOWS:
-        print("[8] Installing openSMILE")
+        logging.info("[8] Installing openSMILE")
         install_opensmile()
     else:
-        print("[8] Windows opensmile already bundled")
+        logging.info("[8] Windows opensmile already bundled")
 
     # --------------------------------------------------
     # 9. VERIFY dependencies (NOW they exist)
     # --------------------------------------------------
-    print("[9] Verifying platform dependencies")
+    logging.info("[9] Verifying platform dependencies")
     verify_windows_deps()
 
     # --------------------------------------------------
     # 10. OTP enrollment (server is running)
     # --------------------------------------------------
-    print("[10] OTP enrollment")
+    logging.info("[10] OTP enrollment")
     otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
 
     # --------------------------------------------------
     # 11. TPM identity already initialized earlier
     # --------------------------------------------------
     if IS_WINDOWS:
-        print("[11] Windows TPM signer already initialized")
+        logging.info("[11] Windows TPM signer already initialized")
     else:
-        print("[11] Sealing master secret")
+        logging.info("[11] Sealing master secret")
         seal_master_secret()
 
     # --------------------------------------------------
     # 12. Integrity baseline
     # --------------------------------------------------
-    print("[12] Writing integrity baseline")
+    logging.info("[12] Writing integrity baseline")
     write_baseline()
 
     # --------------------------------------------------
     # 13. Persist install state
     # --------------------------------------------------
-    print("[13] Persisting install state")
+    logging.info("[13] Persisting install state")
     write_install_state()
 
-    print("🔥 INSTALLER COMPLETED SUCCESSFULLY", flush=True)
+    logging.info("🔥 INSTALLER COMPLETED SUCCESSFULLY", flush=True)
 
 
 # --------------------------------------------------
