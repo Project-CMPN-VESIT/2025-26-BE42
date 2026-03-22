@@ -16,8 +16,7 @@ def install_python_deps():
     print("[STEP] Upgrading pip...", flush=True)
     subprocess.run(
         [str(python_path), "-m", "pip", "install", "--upgrade", "pip"],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
+        capture_output=True,
         text=True
     )
 
@@ -52,8 +51,11 @@ def install_python_deps():
 
             # ✅ STREAM OUTPUT SAFELY
             if process.stdout:
-                for line in iter(process.stdout.readline, ''):
-                    print(line.rstrip(), flush=True)
+                for line in process.stdout:
+                    try:
+                        print(line.rstrip(), flush=True)
+                    except:
+                        pass  # GUI-safe
 
             process.wait()  # ❌ removed timeout (important)
 

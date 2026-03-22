@@ -289,7 +289,7 @@ def main(otp=None, server_addr=None):
         install_python_deps()
         logging.info("[DEBUG] Python deps installed")
     except Exception as e:
-        logging.info("[ERROR] install_python_deps crashed:", e)
+        logging.error("[ERROR] install_python_deps crashed: %s", e)
         raise
 
     logging.info("🔥 DEPS DONE → MOVING TO ENROLLMENT", flush=True)
