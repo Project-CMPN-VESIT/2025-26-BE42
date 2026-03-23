@@ -2,7 +2,7 @@ import grpc
 from pathlib import Path
 from runtime.tpm_guard import sign_message
 from runtime.self_destruct import trigger_self_destruct
-from grpc.orchestrator_pb2_grpc import OrchestratorStub
+from runtime.grpc.orchestrator_pb2_grpc import OrchestratorStub
 
 BASE = Path.home() / ".federated"
 
