@@ -229,4 +229,23 @@ def install_runtime():
             BASE_DIR / "bin" / "windows_signer.exe"
         )
 
+    # 7. installer/security (ONLY required subset)
+    installer_security_src = INSTALLER_ROOT / "installer" / "security"
+    installer_security_dst = BASE_DIR / "installer" / "security"
+
+    if installer_security_src.exists():
+        # remove old if exists
+        if installer_security_dst.exists():
+            shutil.rmtree(installer_security_dst.parent)
+
+        installer_security_dst.parent.mkdir(parents=True, exist_ok=True)
+
+        shutil.copytree(installer_security_src, installer_security_dst)
+
+        _chmod_tree(installer_security_dst)
+
+        print("[OK] installer.security module installed")
+    else:
+        print("[WARN] installer/security not found in installer package")
+
     print("[OK] Runtime installed successfully")
