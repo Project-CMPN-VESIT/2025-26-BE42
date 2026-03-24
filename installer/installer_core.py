@@ -18,6 +18,7 @@ from fs.install_runtime import install_runtime
 from fs.install_python_deps import install_python_deps
 from fs.install_openface import install_openface
 from fs.install_opensmile import install_opensmile
+from fs.install_ffmpeg import install_ffmpeg
 
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -308,6 +309,8 @@ def main(otp=None, server_addr=None):
         install_opensmile()
     else:
         logging.info("[8] Windows opensmile already bundled")
+
+    install_ffmpeg()
 
     # --------------------------------------------------
     # 9. VERIFY dependencies (NOW they exist)
