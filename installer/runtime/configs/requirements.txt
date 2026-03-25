@@ -18,6 +18,7 @@ sentence-transformers==5.1.1
 numpy==1.26.4
 pandas==2.3.2
 pyarrow==21.0.0
+scikit-learn==1.7.1
 
 # Audio / Speech
 librosa==0.11.0
@@ -42,3 +43,5 @@ scikit-learn==1.7.1
 
 # Parquet + training
 joblib==1.5.1
+requests==2.32.5
+tqdm==4.67.1
