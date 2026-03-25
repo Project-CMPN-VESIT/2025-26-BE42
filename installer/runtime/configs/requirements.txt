@@ -34,7 +34,6 @@ nltk==3.9.2
 
 # Optional but used in code paths
 boto3==1.40.32
-Pyfhel==3.5.0
 
 # Utilities
 requests==2.32.5
