@@ -19,6 +19,8 @@ from fs.install_python_deps import install_python_deps
 from fs.install_openface import install_openface
 from fs.install_opensmile import install_opensmile
 from fs.install_ffmpeg import install_ffmpeg
+from fs.install_spacy_model import install_spacy_model
+from runtime.validate_deps import check
 
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -295,6 +297,9 @@ def main(otp=None, server_addr=None):
 
     logging.info("🔥 DEPS DONE → MOVING TO ENROLLMENT")
 
+    check()
+    logging.info("[6.1] Installing spaCy model")
+    install_spacy_model()
     # --------------------------------------------------
     # 7. Native ML dependencies
     # --------------------------------------------------
