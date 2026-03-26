@@ -35,11 +35,6 @@ nltk==3.9.2
 # Optional but used in code paths
 boto3==1.40.32
 
-# Utilities
-requests==2.32.5
-tqdm==4.67.1
-scikit-learn==1.7.1
-
 # Parquet + training
 joblib==1.5.1
 requests==2.32.5
