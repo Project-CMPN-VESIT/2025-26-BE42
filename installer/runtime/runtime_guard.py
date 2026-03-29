@@ -1,4 +1,4 @@
-from security.integrity import verify_integrity
+from installer.security.integrity import verify_integrity
 from .tpm_guard import unseal_master_secret
 from .self_destruct import trigger_self_destruct
 import os

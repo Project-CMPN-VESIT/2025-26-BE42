@@ -20,6 +20,7 @@ EXCLUDE_PREFIXES = {
     "runtime/cache/",
     "runtime/__pycache__/",
     "agents/__pycache__/",
+    "__pycache__/",
 }
 
 INTEGRITY_SCOPE = [
@@ -34,7 +35,15 @@ def _should_include(path: Path) -> bool:
 
 def _should_exclude(path: Path) -> bool:
     rel = path.relative_to(FEDERATED_DIR).as_posix()
-    return any(rel.startswith(e) for e in EXCLUDE_PREFIXES)
+
+    if any(rel.startswith(e) for e in EXCLUDE_PREFIXES):
+        return True
+
+    # 🚨 CRITICAL FIX
+    if rel.endswith(".pyc") or "__pycache__" in rel:
+        return True
+
+    return False
 
 def compute_tree_hash(root: Path) -> str:
     h = hashlib.sha256()
@@ -47,10 +56,10 @@ def compute_tree_hash(root: Path) -> str:
             continue
         if not _should_include(path):
             continue
-        if path.suffix == ".pyc":
+        if not path.suffix == ".py":
             continue
 
-        rel = path.relative_to(root).as_posix().encode()
+        rel = str(path.relative_to(root)).replace("\\", "/").lower().encode()
         h.update(rel)
         h.update(path.read_bytes())
         files_hashed += 1
