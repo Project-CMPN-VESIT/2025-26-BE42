@@ -9,7 +9,7 @@ from agents.trainer.trainer_mentalbert_privacy import orchestrate as trainer_orc
 from agents.dp.dp_agent import DPAgent
 from agents.enc.enc_agent import EncryptionAgent
 from core.centralized_secure_store import SecureStore
-from grpc.orchestrator_pb2 import DeviceId, Receipt
+from runtime.grpc.orchestrator_pb2 import DeviceId, Receipt
 from runtime.tpm_guard import sign_message
 
 # --------------------------------------------------
