@@ -213,18 +213,40 @@ def create_venv():
         print("[INFO] venv already exists, skipping")
         return
 
+    # 🔥 Find real Python
+    python_cmd = "python"
+
+    try:
+        result = subprocess.run(
+            [python_cmd, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError("Python not found")
+
+    except Exception:
+        raise RuntimeError("System Python not available")
+
+    print("[DEBUG] Using system python:", python_cmd)
+
+    # 🔥 Create venv
     result = subprocess.run(
-        [sys.executable, "-m", "venv", str(VENV_DIR)],
+        [python_cmd, "-m", "venv", str(VENV_DIR)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
 
+    print(result.stdout)
+    print(result.stderr)
+
     if result.returncode != 0:
-        print(result.stderr)
         raise RuntimeError("Failed to create venv")
 
-    # ✅ VERIFY CREATION
+    # 🔥 Verify
     python_path = VENV_DIR / "Scripts" / "python.exe"
 
     if not python_path.exists():
