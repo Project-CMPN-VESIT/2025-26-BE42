@@ -350,7 +350,9 @@ def main(otp=None, server_addr=None):
     # 11. TPM identity already initialized earlier
     # --------------------------------------------------
     if IS_WINDOWS:
-        logging.info("[11] Windows TPM signer already initialized")
+        logging.info("[11] Creating Windows master secret")
+        from installer.security.tpm_seal import create_master_secret_windows
+        create_master_secret_windows()
     else:
         logging.info("[11] Sealing master secret")
         seal_master_secret()

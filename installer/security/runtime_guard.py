@@ -3,11 +3,11 @@ import sys
 import time
 from pathlib import Path
 
-from .anti_debug import anti_debug
-from .integrity import verify_integrity
-from .tpm_attestation import tpm_attestation
-from .tpm_seal import unseal_master_secret
-from .self_destruct import trigger_self_destruct
+from installer.security.anti_debug import anti_debug
+from installer.security.integrity import verify_integrity
+from installer.security.tpm_attestation import tpm_attestation
+from installer.security.tpm_seal import unseal_master_secret
+from installer.security.self_destruct import trigger_self_destruct
 
 FEDERATED_DIR = Path.home() / ".federated"
 RUNTIME_LOCK = FEDERATED_DIR / "state" / "runtime.lock"

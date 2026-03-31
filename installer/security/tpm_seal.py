@@ -69,21 +69,40 @@ def seal_master_secret():
 
     print("[TPM] Master secret sealed successfully")
 
+def create_master_secret_windows():
+    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if SECRET_PLAIN.exists():
+        print("[TPM] Master secret already exists (Windows)")
+        return
+
+    print("[TPM] Creating master secret (Windows fallback)")
+    secret = secrets.token_bytes(32)
+    SECRET_PLAIN.write_bytes(secret)
 
 def unseal_master_secret() -> bytes:
     """
-    Unseals secret ONLY if PCR state matches.
+    Unseals secret ONLY if exists.
+    If not → creates + seals (FIRST RUN FIX)
     """
+
     if not SEALED_OBJ.exists():
-        sys.exit("[SECURITY] Sealed secret missing")
+        print("[TPM] No sealed secret found → creating new one")
+        seal_master_secret()
 
-    print("[TPM] Unsealing master secret")
-    output = subprocess.check_output([
-        "tpm2_unseal",
-        "-c", str(SEALED_OBJ)
-    ])
+    try:
+        print("[TPM] Unsealing master secret")
 
-    if not output:
+        output = subprocess.check_output([
+            "tpm2_unseal",
+            "-c", str(SEALED_OBJ)
+        ])
+
+        if not output:
+            raise RuntimeError("Empty TPM output")
+
+        return output
+
+    except Exception as e:
+        print("[TPM] Unseal failed:", e)
         sys.exit("[SECURITY] TPM unseal failed")
-
-    return output

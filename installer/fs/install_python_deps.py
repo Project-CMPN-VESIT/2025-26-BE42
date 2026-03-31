@@ -40,26 +40,27 @@ def install_python_deps():
         print(f"\n[INSTALL] {pkg}", flush=True)
 
         try:
-            process = subprocess.Popen(
+            result = subprocess.run(
                 [
                     str(python_path),
                     "-m",
                     "pip",
                     "install",
                     "--no-cache-dir",
+                    "--force-reinstall",
+                    "--no-deps",
                     pkg
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                capture_output=True,
                 text=True
             )
 
-            for line in process.stdout:
+            for line in result.stdout:
                 print(line.strip())
 
-            process.wait()
+            result.wait()
 
-            if process.returncode != 0:
+            if result.returncode != 0:
                 print(f"[SKIPPED] {pkg}")
             else:
                 print(f"[OK] {pkg}")

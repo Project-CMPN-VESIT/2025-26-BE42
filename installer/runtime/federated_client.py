@@ -7,7 +7,7 @@ BASE = Path(__file__).resolve().parent.parent
 VENV_PYTHON = BASE / "venv" / "Scripts" / "python.exe"
 
 # 🚨 Re-exec inside venv if not already
-if not str(sys.executable).lower().startswith(str(VENV_PYTHON).lower()):
+if Path(sys.executable).resolve() != VENV_PYTHON.resolve():
     print("[DEBUG] Switching to venv Python")
     subprocess.run([str(VENV_PYTHON), __file__, *sys.argv[1:]])
     sys.exit(0)
@@ -18,6 +18,11 @@ if str(BASE) not in sys.path:
 
 print("[DEBUG] USING PYTHON:", sys.executable)
 print("[DEBUG] PYTHONPATH =", sys.path[:3])
+
+# ✅ FIX IMPORT PATH FOR installer.security
+SECURITY_PATH = BASE / "installer"
+if str(SECURITY_PATH) not in sys.path:
+    sys.path.insert(0, str(SECURITY_PATH))
 
 import hashlib
 import sys

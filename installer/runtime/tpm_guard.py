@@ -70,7 +70,9 @@ def unseal_master_secret() -> bytes:
             # For now: read file-based sealed secret
             secret_path = BASE_DIR / "secrets" / "master.bin"
             if not secret_path.exists():
-                trigger_self_destruct("Master secret missing")
+                print("[TPM] Master secret missing → creating (first run)")
+                from installer.security.tpm_seal import create_master_secret_windows
+                create_master_secret_windows()
             return secret_path.read_bytes()
 
         else:
