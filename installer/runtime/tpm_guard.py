@@ -99,34 +99,25 @@ def unseal_master_secret() -> bytes:
 def get_device_pubkey() -> bytes:
     try:
         if IS_WINDOWS:
+            pubkey_file = TPM_DIR / "device_pubkey.pem"
+
             if not WINDOWS_SIGNER.exists():
                 print("[DEBUG] Windows signer missing at:", WINDOWS_SIGNER)
                 return b""
 
-            try:
-                proc = subprocess.run(
-                    [str(WINDOWS_SIGNER), "--pubkey", str(PUBKEY_PEM)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+            # Always regenerate if missing
+            if not pubkey_file.exists():
+                subprocess.run(
+                    [str(WINDOWS_SIGNER), "--pubkey", str(pubkey_file)],
                     check=True,
                     creationflags=subprocess.CREATE_NO_WINDOW
                 )
 
-                if not proc.stdout:
-                    print("[DEBUG] Empty public key output")
-                    return b""
-
-                if not PUBKEY_PEM.exists():
-                    print("[DEBUG] Pubkey file not created")
-                    return b""
-
-                return PUBKEY_PEM.read_bytes()
-
-            except Exception as e:
-                print("[DEBUG] Signer failed:", e)
-                if 'proc' in locals():
-                    print("[DEBUG] STDERR:", proc.stderr.decode(errors="ignore"))
+            if not pubkey_file.exists():
+                print("[DEBUG] Pubkey file not created")
                 return b""
+
+            return pubkey_file.read_bytes()
 
         else:
             if not PUBKEY_PEM.exists():
@@ -135,4 +126,4 @@ def get_device_pubkey() -> bytes:
 
     except Exception as e:
         print("[DEBUG] PUBKEY ERROR:", e)
-        return b""   # TEMP: do not self-destruct
+        return b""

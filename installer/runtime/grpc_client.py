@@ -14,23 +14,20 @@ def create_grpc_stub(server_addr: str):
             certificate_chain=(BASE / "keys" / "client.pem").read_bytes(),
         )
 
-        host = server_addr.split(":")[0]
-
         channel = grpc.secure_channel(
             server_addr,
             creds,
             options=[
-                ('grpc.ssl_target_name_override', host),
-                ('grpc.default_authority', host),
+                ('grpc.ssl_target_name_override', '192.168.1.7'),
             ]
         )
 
-        # 🔥 ensure connection works
+        # Ensure TLS handshake completes
         grpc.channel_ready_future(channel).result(timeout=10)
 
         stub = OrchestratorStub(channel)
 
-        # Attach TPM-backed signer dynamically
+        # Attach TPM-backed signer
         stub.sign_message = sign_message
 
         return stub
