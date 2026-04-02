@@ -254,7 +254,8 @@ pub async fn serve(
     );
 
     let tls = ServerTlsConfig::new()
-        .identity(server_identity);
+        .identity(server_identity)
+        .client_ca_root(client_ca);
 
     println!("[TLS] TLS ENABLED (app-level mTLS enforcement)");
     
@@ -281,9 +282,10 @@ impl Service {
     fn require_client_cert<T>(req: &Request<T>) -> Result<(), Status> {
         let certs = req.peer_certs();
 
-        if certs.is_none() {
-            return Err(Status::unauthenticated("client certificate required"));
-        }
+        match certs {
+            Some(certs) if !certs.is_empty() => Ok(()),
+            _ => Err(Status::unauthenticated("client certificate required")),
+        }?;
 
         Ok(())
     }
