@@ -1,81 +1,138 @@
 #!/usr/bin/env python3
+"""
+federated_client.py — Main entry point for the federated learning client.
+
+Phases integrated here:
+  Phase 3:  Dual-channel mTLS (create_grpc_stub)
+  Phase 5:  Continuous daemon (daemon_loop with capture)
+  Phase 7:  IntegrityWatcher background thread
+  Phase 9:  gRPC retry (via call_with_retry in pipeline)
+  Phase 11: Structured logging + metrics + health reporting
+"""
+
 import sys
 from pathlib import Path
-import subprocess
 
-BASE = Path(__file__).resolve().parent.parent
+# ── Ensure .federated is on PYTHONPATH ───────────────────────────────────────
+BASE = Path(__file__).resolve().parent.parent   # ~/.federated
 VENV_PYTHON = BASE / "venv" / "Scripts" / "python.exe"
 
-# 🚨 Re-exec inside venv if not already
-if Path(sys.executable).resolve() != VENV_PYTHON.resolve():
-    print("[DEBUG] Switching to venv Python")
+if Path(sys.executable).resolve() != VENV_PYTHON.resolve() and VENV_PYTHON.exists():
+    import subprocess
     subprocess.run([str(VENV_PYTHON), __file__, *sys.argv[1:]])
     sys.exit(0)
 
-# ✅ Ensure imports work
-if str(BASE) not in sys.path:
-    sys.path.insert(0, str(BASE))
+for extra in [str(BASE), str(BASE / "bin"), str(BASE / "installer")]:
+    if extra not in sys.path:
+        sys.path.insert(0, extra)
 
-print("[DEBUG] USING PYTHON:", sys.executable)
-print("[DEBUG] PYTHONPATH =", sys.path[:3])
-
-# ✅ FIX IMPORT PATH FOR installer.security
-SECURITY_PATH = BASE / "installer"
-if str(SECURITY_PATH) not in sys.path:
-    sys.path.insert(0, str(SECURITY_PATH))
+# ── Phase 11: logging FIRST ──────────────────────────────────────────────────
+from runtime.logging_config import setup_logging, MetricsCollector, HealthReporter
+setup_logging(level="INFO")
 
 import hashlib
-import sys
 import os
+import time
+import logging
+from typing import Optional
+
 from runtime.grpc.orchestrator_pb2 import CSR
 from runtime.runtime_guard import runtime_guard
-from runtime.grpc_client import create_grpc_stub
+from runtime.grpc_client import create_grpc_stub, call_with_retry
 from runtime.pipeline import run_pipeline
 from runtime.tpm_guard import get_device_pubkey
 from runtime.daemon import daemon_loop
-import time
-from pathlib import Path
+from security.integrity import IntegrityWatcher
 
-_LOCK = Path.home() / ".federated" / "state" / "runtime.lock"
+log = logging.getLogger("federated_client")
+
+_LOCK = BASE / "state" / "runtime.lock"
+
+metrics = MetricsCollector()
+health  = HealthReporter(metrics=metrics)
+
+
+def _cleanup_lock():
+    try:
+        _LOCK.unlink(missing_ok=True)
+    except Exception:
+        pass
+
 
 def main():
     mode = "daemon"
     if len(sys.argv) > 1:
-        mode = sys.argv[1]
+        mode = sys.argv[1].lstrip("-")
+
+    log.info("Federated client starting (mode=%s)", mode)
+
+    # ── Phase 7: start integrity watcher ────────────────────────────────────
+    watcher = IntegrityWatcher(interval_s=300, max_violations=2)
+    watcher.start()
+    log.info("Integrity watcher started")
 
     try:
+        # ── Runtime security gate ────────────────────────────────────────────
         master_secret = runtime_guard()
         device_pubkey = get_device_pubkey()
+        if not device_pubkey:
+            log.error("Failed to obtain device public key — is TPM initialised?")
+            health.unhealthy("no device pubkey")
+            sys.exit(1)
+
         device_id = hashlib.sha256(device_pubkey).digest()
 
+        # ── Server address ───────────────────────────────────────────────────
         SERVER_ADDR = os.environ.get("FED_SERVER")
         if not SERVER_ADDR:
             SERVER_ADDR = input("Enter server address (host:port): ").strip()
 
+        # ── Phase 3: dual-channel gRPC ───────────────────────────────────────
         stub = create_grpc_stub(SERVER_ADDR)
 
+        # Register device (best-effort; may already be registered)
         try:
-            stub.RegisterDevice(CSR(device_pubkey=device_pubkey), timeout=10)
-        except Exception:
-            pass
+            call_with_retry(stub.RegisterDevice, CSR(device_pubkey=device_pubkey), timeout=10)
+        except Exception as e:
+            log.debug("RegisterDevice skipped: %s", e)
 
-        if mode in ("--run-once", "run-once"):
-            run_pipeline(stub, device_id, master_secret)
-            return
+        health.healthy(server=SERVER_ADDR)
 
-        if mode == "daemon":
-            daemon_loop(stub, device_id, master_secret)
-            return
-
-        print("Unknown mode:", mode)
-
-    finally:
-        # Always clean up the lock, even on exception
-        if _LOCK.exists():
+        # ── Dispatch mode ────────────────────────────────────────────────────
+        if mode in ("run-once", "run_once"):
+            metrics.record_attempt()
+            t0 = time.time()
             try:
-                _LOCK.unlink()
-            except Exception:
-                pass
+                run_pipeline(stub, device_id, master_secret)
+                metrics.record_success(time.time() - t0)
+                health.healthy(last_run="success")
+                log.info("Run-once pipeline complete ✓")
+            except Exception as e:
+                metrics.record_failure(str(e))
+                health.degraded(str(e))
+                log.error("Run-once pipeline failed: %s", e)
+                raise
+
+        elif mode == "daemon":
+            log.info("Starting daemon loop...")
+            health.healthy(daemon="running")
+            daemon_loop(stub, device_id, master_secret)
+
+        else:
+            log.error("Unknown mode: %s (use: daemon | run-once)", mode)
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        log.info("Interrupted by user")
+    except Exception as e:
+        log.exception("Fatal error: %s", e)
+        health.unhealthy(str(e))
+        sys.exit(1)
+    finally:
+        watcher.stop()
+        _cleanup_lock()
+        metrics.log_snapshot()
+        log.info("Client exiting")
 
 
 if __name__ == "__main__":

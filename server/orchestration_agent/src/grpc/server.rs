@@ -48,19 +48,21 @@ pub struct Service {
 impl Orchestrator for Service {
 
     async fn enroll_device(
-    &self,
-    req: Request<EnrollRequest>,
-) -> Result<Response<EnrollResponse>, Status> {
-        println!("[SERVER] EnrollDevice called");
-        use std::fs;
-        use std::process::Command;
-        use std::io::Write;
-        use tempfile::NamedTempFile;
-
-        let req = req.into_inner();
-
-        // 1. Validate OTP
-        if !crate::otp::consume_otp(&req.enrollment_token) {
+        &self,
+        req: Request<EnrollRequest>,
+    ) -> Result<Response<EnrollResponse>, Status> {
+ 
+        // Get peer address for rate limiting (Phase 8)
+        let peer_addr = req
+            .remote_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+ 
+        let req_inner = req.into_inner();
+ 
+        // Rate-limited OTP consumption
+        if !crate::otp::consume_otp_from(&req_inner.enrollment_token, &peer_addr) {
+            tracing::warn!("Enrollment rejected for peer {} — invalid/expired OTP", peer_addr);
             return Err(Status::permission_denied("invalid or expired OTP"));
         }
 
@@ -254,7 +256,8 @@ pub async fn serve(
     );
 
     let tls = ServerTlsConfig::new()
-        .identity(server_identity);
+        .identity(server_identity)
+        .client_ca_root(client_ca);
 
     println!("[TLS] TLS ENABLED (app-level mTLS enforcement)");
     

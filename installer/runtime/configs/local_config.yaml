@@ -1,4 +1,4 @@
-mode: interactive                # one of: interactive | batch | continuous
+mode: interactive                # one of: interactive | batch | continuous | session
 
 ingest:
   video:
@@ -42,7 +42,10 @@ ingest:
   text:
     enabled: true
     source: "asr"
-    asr_model: "openai/whisper-small"
+    # whisper model name (used when openai-whisper package IS installed)
+    asr_model: "small"
+    # HuggingFace model ID (used as fallback when openai-whisper is NOT installed)
+    asr_hf_model: "openai/whisper-small"
     offline: true
     output_dir: "~/.federated/data/secure_store/processed/text"
     receipt_dir: "~/.federated/data/secure_store/receipts"
@@ -88,14 +91,18 @@ audio_pipe:
 
 text_pipe:
   asr_enabled: true
+  # "whisper" uses openai-whisper package; "hf" uses transformers pipeline
   asr_backend: "whisper"
+  # Whisper model name (tiny/base/small/medium/large)
   asr_model: "small"
+  # HuggingFace model ID used as fallback when whisper package is unavailable
+  asr_hf_model: "openai/whisper-small"
   ner_scrub: ["PERSON", "GPE", "ORG"]
   embedder: "sentence-transformers/all-MiniLM-L6-v2"
   metrics: ["sentiment", "ttr", "pronoun_ratio"]
 
 storage:
-  # Phase-1 fix: this must match _CANONICAL_ROOT in centralized_secure_store.py
+  # MUST match _CANONICAL_ROOT in centralized_secure_store.py
   root: "~/.federated/data/secure_store"
   encrypt: true
   key_provider: "file"

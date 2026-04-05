@@ -106,7 +106,10 @@ class MultiModalDataset(Dataset):
 
     def __getitem__(self, idx):
         r = self.records[idx]
-        text = (r.get("transcript") or r.get("text") or "").strip()
+        def _safe_text(r):
+            return (r.get("transcript") or r.get("text") or "").strip()
+
+        text = _safe_text(r)
         enc = self.tokenizer(
             text,
             truncation=True,
@@ -293,25 +296,50 @@ def read_parquet_records(path: str) -> List[Dict[str, Any]]:
                 except Exception:
                     pass
 
-    # -------- FILTER BAD TRANSCRIPTS (CRITICAL FIX) --------
-    filtered: List[Dict[str, Any]] = []
-    for r in records:
-        derived = r.get("derived") or {}
-        status = derived.get("transcript_status", "ok")
+    # -------- FILTER BAD TRANSCRIPTS (FIXED) --------
+    def _filter_records(records):
+        filtered = []
+        dropped = 0
 
-        # Drop rows with failed or missing ASR
-        if status in ("failed", "missing"):
-            continue
+        for r in records:
+            derived = r.get("derived") or {}
 
-        filtered.append(r)
+            # Handle JSON string case
+            if isinstance(derived, str):
+                try:
+                    import json
+                    derived = json.loads(derived)
+                except Exception:
+                    derived = {}
 
-    if not filtered:
-        raise RuntimeError(
-            "All records were filtered out due to missing/failed transcripts. "
-            "Trainer cannot proceed."
-        )
+            status = derived.get("transcript_status", "ok")
 
-    return filtered
+            # Only drop HARD failures
+            if status == "failed":
+                dropped += 1
+                continue
+
+            filtered.append(r)
+
+        if dropped:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Dropped %d records with transcript_status=failed", dropped
+            )
+
+        if not filtered:
+            raise RuntimeError(
+                "All records were dropped (transcript_status=failed for all). "
+                "Check your ASR setup."
+            )
+
+        return filtered
+
+
+    # Apply filter
+    records = _filter_records(records)
+
+    return records
 
 def collate_batch(batch):
     input_ids = torch.stack([b["input_ids"] for b in batch], dim=0)

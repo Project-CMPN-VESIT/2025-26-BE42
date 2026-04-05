@@ -36,8 +36,10 @@ async fn main() -> anyhow::Result<()> {
     // 4. DEV ONLY: bootstrap enrollment OTP
     // --------------------------------------------------
     let otp = crate::otp::generate_otp();
-    state.enrollment_tokens.insert(otp.to_string(), ());
-    println!("[DEV] Enrollment OTP enabled: {}", otp);
+    // Note: enrollment_tokens map is no longer needed — OTP_STORE handles it internally
+    // Keep the insert for backward compat with SubmitReceipt code that reads it:
+    state.enrollment_tokens.insert(otp.clone(), ());
+    println!("[DEV] Enrollment OTP: {} (valid for 60 seconds)", otp);
 
     // --------------------------------------------------
     // 5. Start background systems
