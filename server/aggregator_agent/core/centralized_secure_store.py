@@ -75,11 +75,7 @@ class SecureStore:
         context_path = Path(p.parent).resolve()
         root_path = self.root.resolve()
 
-        try:
-            context = str(context_path.relative_to(root_path))
-        except ValueError:
-            # fallback safety (should never happen)
-            context = str(context_path)
+        context = str(Path(uri[len("file://"):]).parent.name)
 
         key = self._derive_key(context)
         aesgcm = AESGCM(key)
@@ -102,13 +98,7 @@ class SecureStore:
         nonce = base64.b64decode(payload["nonce"])
         ct = base64.b64decode(payload["ct"])
 
-        context_path = p.parent.resolve()
-        root_path = self.root.resolve()
-
-        try:
-            context = str(context_path.relative_to(root_path))
-        except ValueError:
-            context = str(context_path)
+        context = str(Path(uri[len("file://"):]).parent.name)
 
         key = self._derive_key(context)
         aesgcm = AESGCM(key)
