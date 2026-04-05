@@ -76,6 +76,8 @@ class SecureStore:
         root_path = self.root.resolve()
 
         context = str(Path(uri[len("file://"):]).parent.name)
+        if "local_updates" in context:
+            context = context.split("local_updates")[0].rstrip("/")
 
         key = self._derive_key(context)
         aesgcm = AESGCM(key)
@@ -102,6 +104,8 @@ class SecureStore:
         root_path = self.root.resolve()
 
         context = str(Path(uri[len("file://"):]).parent.name)
+        if "local_updates" in context:
+            context = context.split("local_updates")[0].rstrip("/")
 
         key = self._derive_key(context)
         aesgcm = AESGCM(key)
