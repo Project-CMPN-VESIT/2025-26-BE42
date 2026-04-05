@@ -18,7 +18,8 @@ def create_grpc_stub(server_addr: str):
             server_addr,
             creds,
             options=[
-                ('grpc.ssl_target_name_override', '192.168.1.7'),
+                ('grpc.ssl_target_name_override', 'localhost'),
+                ('grpc.default_authority', 'localhost'),
             ]
         )
 
