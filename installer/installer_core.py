@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""
+installer_core.py
+
+Phase 4: ssl_target_name_override removed from otp_enrollment — server cert now
+         has proper IP SAN so no hostname override is needed.
+BUG-3:   Fixed logging.info() calls that passed extra positional args without %s
+         (logging.info("msg:", val) silently drops val; correct form is
+          logging.info("msg: %s", val)).
+"""
+
 import sys
 
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -10,9 +20,6 @@ import platform
 from pathlib import Path
 import subprocess
 
-# -------------------------
-# Filesystem & runtime
-# -------------------------
 from fs.secure_layout import create_secure_layout
 from fs.install_runtime import install_runtime
 from fs.install_python_deps import install_python_deps
@@ -28,9 +35,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 import datetime
 
-# -------------------------
-# Security
-# -------------------------
 from security.anti_debug import anti_debug
 from security.integrity import write_baseline
 from security.tpm_attestation import (
@@ -43,30 +47,20 @@ from security.deps_windows import (
     verify_python_and_pip,
 )
 
-# -------------------------
-# gRPC
-# -------------------------
 from runtime.grpc.orchestrator_pb2_grpc import OrchestratorStub
 from runtime.grpc.orchestrator_pb2 import EnrollRequest
 
-# -------------------------
-# Constants
-# -------------------------
 IS_WINDOWS = platform.system().lower() == "windows"
 
-BASE_DIR = Path.home() / ".federated"
+BASE_DIR   = Path.home() / ".federated"
 STATE_FILE = BASE_DIR / "state" / "install_state.json"
-KEYS_DIR = BASE_DIR / "keys"
+KEYS_DIR   = BASE_DIR / "keys"
 
-INSTALLER_OTP = None
+INSTALLER_OTP        = None
 INSTALLER_SERVER_ADDR = None
 
-
-# --------------------------------------------------
-# Helpers
-# --------------------------------------------------
+# ── Logging ───────────────────────────────────────────────────────────────────
 import logging
-from pathlib import Path
 
 LOG_FILE = Path.home() / ".federated" / "logs" / "installer.log"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +72,7 @@ logging.basicConfig(
 )
 
 logging.info("Installer started")
+
 
 def write_install_state():
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -95,13 +90,11 @@ def write_install_state():
 
 
 def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
-    logging.info(f"[DEBUG] OTP received by installer: {token}")
-    logging.info(f"[DEBUG] SERVER_ADDR = {server_addr}")
-    logging.info("[DEBUG] CA exists:", (KEYS_DIR / "ca.pem").exists())
+    # BUG-3 FIX: logging.info with %s formatter, not bare positional args
+    logging.info("[DEBUG] OTP received by installer: %s", token)
+    logging.info("[DEBUG] SERVER_ADDR = %s", server_addr)
+    logging.info("[DEBUG] CA exists: %s", (KEYS_DIR / "ca.pem").exists())
     logging.info("[DEBUG] About to create gRPC channel")
-    global INSTALLER_OTP
-
-    import subprocess
 
     token = token.strip()
 
@@ -119,7 +112,6 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         key_size=2048,
     )
 
-    # Save key
     with open(client_key, "wb") as f:
         f.write(
             key.private_bytes(
@@ -145,37 +137,31 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
     with open(client_csr, "wb") as f:
         f.write(csr_bytes)
 
-    SERVER_ADDR = server_addr
-
-    # 3. Create secure channel (server TLS only)
+    # ── Phase 4: NO ssl_target_name_override ──────────────────────────────────
+    # Server cert has IP SAN — standard TLS validation works correctly.
     creds = grpc.ssl_channel_credentials(
         root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
     )
 
-    logging.info("🔥 STEP 10: STARTING ENROLLMENT 🔥")
+    logging.info("STEP 10: STARTING ENROLLMENT")
 
+    # Phase 4 fix: removed grpc.ssl_target_name_override and grpc.default_authority
     channel = grpc.secure_channel(
-        SERVER_ADDR,
+        server_addr,
         creds,
         options=[
-            ('grpc.ssl_target_name_override', 'localhost'),
-            ('grpc.default_authority', 'localhost'),
+            ("grpc.keepalive_time_ms", 10_000),
+            ("grpc.keepalive_timeout_ms", 5_000),
         ]
     )
 
     logging.info("[DEBUG] Waiting for channel ready...")
-
     grpc.channel_ready_future(channel).result(timeout=10)
-
-    logging.info("[DEBUG] Channel READY ✅")
-
-    logging.info("[DEBUG] Channel READY ✅")    
+    logging.info("[DEBUG] Channel READY")
 
     stub = OrchestratorStub(channel)
-
     logging.info("[DEBUG] gRPC channel created")
 
-    # 4. Send enrollment request with CSR
     try:
         logging.info("[DEBUG] Sending EnrollDevice RPC")
         resp = stub.EnrollDevice(
@@ -186,23 +172,23 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
             ),
             timeout=10
         )
-        logging.info("🔥 STEP 10: ENROLLMENT COMPLETED 🔥")
+        logging.info("STEP 10: ENROLLMENT COMPLETED")
     except Exception as e:
-        logging.info("[ERROR] gRPC failed:", e)
+        logging.error("[ERROR] gRPC failed: %s", e)
         raise
 
     if not resp.ok:
         sys.exit("[SECURITY] Enrollment failed")
 
-    # 5. Store signed certificate
     client_cert_path = KEYS_DIR / "client.pem"
     client_cert_path.write_bytes(resp.client_cert)
     client_cert_path.chmod(0o600)
 
     logging.info("[OK] Device enrolled + client certificate installed")
 
+
 def create_venv():
-    BASE = Path.home() / ".federated"
+    BASE     = Path.home() / ".federated"
     VENV_DIR = BASE / "venv"
 
     print("[STEP] Creating virtual environment")
@@ -211,7 +197,6 @@ def create_venv():
         print("[INFO] venv already exists, skipping")
         return
 
-    # 🔥 Find real Python
     python_cmd = "python"
 
     try:
@@ -221,16 +206,13 @@ def create_venv():
             stderr=subprocess.PIPE,
             text=True
         )
-
         if result.returncode != 0:
             raise RuntimeError("Python not found")
-
     except Exception:
         raise RuntimeError("System Python not available")
 
     print("[DEBUG] Using system python:", python_cmd)
 
-    # 🔥 Create venv
     result = subprocess.run(
         [python_cmd, "-m", "venv", str(VENV_DIR)],
         stdout=subprocess.PIPE,
@@ -244,54 +226,36 @@ def create_venv():
     if result.returncode != 0:
         raise RuntimeError("Failed to create venv")
 
-    # 🔥 Verify
     python_path = VENV_DIR / "Scripts" / "python.exe"
-
     if not python_path.exists():
         raise RuntimeError("Venv created but python.exe missing")
 
     print("[OK] venv created successfully")
 
-# --------------------------------------------------
-# Main installer
-# --------------------------------------------------
+
 def main(otp=None, server_addr=None):
+    global INSTALLER_OTP, INSTALLER_SERVER_ADDR
 
-    global INSTALLER_OTP
-    global INSTALLER_SERVER_ADDR
-
-    INSTALLER_OTP = otp
+    INSTALLER_OTP         = otp
     INSTALLER_SERVER_ADDR = server_addr
-    
-    logging.info("=== BUILD VERSION 2 WITH GUI INPUT FIX ===")
-    # --------------------------------------------------
-    # 1. Anti-debug (installer mode)
-    # --------------------------------------------------
+
+    logging.info("=== BUILD VERSION 3 — Phase 4 SAN + logging fixes ===")
+
     logging.info("[1] Anti-debug (installer mode)")
     anti_debug(strict=True, installer_mode=True)
 
-    # --------------------------------------------------
-    # 2. Secure filesystem layout
-    # --------------------------------------------------
     logging.info("[2] Secure filesystem layout")
     create_secure_layout()
 
-    # --------------------------------------------------
-    # 3. Runtime payload (code + configs)
-    # --------------------------------------------------
     logging.info("[3] Installing runtime payload")
     install_runtime()
     create_venv()
-    # --------------------------------------------------
-    # 4. TPM identity (safe for installer)
-    # --------------------------------------------------
+
     logging.info("[4] TPM identity provisioning")
     provision_tpm_identity()
     if IS_WINDOWS:
         logging.info("[TPM] Initializing Windows signer")
-
         signer = BASE_DIR / "bin" / "windows_signer.exe"
-
         try:
             subprocess.run(
                 [str(signer), "--init"],
@@ -300,23 +264,17 @@ def main(otp=None, server_addr=None):
             )
             logging.info("[TPM] Windows signer initialized")
         except Exception as e:
-            logging.error(f"[TPM] Signer init failed: {e}")
+            logging.error("[TPM] Signer init failed: %s", e)
             raise
+
     device_pubkey = get_device_pubkey_installer_safe()
 
-    # --------------------------------------------------
-    # 5. Windows runtime prerequisites
-    # --------------------------------------------------
     if IS_WINDOWS:
         logging.info("[5] Verifying Python & VC runtime")
         from security.windows_runtime import check_vc_runtime
-
         check_vc_runtime()
         verify_python_and_pip()
-    
-    # --------------------------------------------------
-    # 6. Python dependencies
-    # --------------------------------------------------
+
     logging.info("[6] Installing Python dependencies")
     try:
         install_python_deps()
@@ -325,14 +283,12 @@ def main(otp=None, server_addr=None):
         logging.error("[ERROR] install_python_deps crashed: %s", e)
         raise
 
-    logging.info("🔥 DEPS DONE → MOVING TO ENROLLMENT")
+    logging.info("DEPS DONE → MOVING TO ENROLLMENT")
 
     check()
     logging.info("[6.1] Installing spaCy model")
     install_spacy_model()
-    # --------------------------------------------------
-    # 7. Native ML dependencies
-    # --------------------------------------------------
+
     if not IS_WINDOWS:
         logging.info("[7] Installing OpenFace")
         install_openface()
@@ -343,25 +299,16 @@ def main(otp=None, server_addr=None):
         logging.info("[8] Installing openSMILE")
         install_opensmile()
     else:
-        logging.info("[8] Windows opensmile already bundled")
+        logging.info("[8] Windows openSMILE already bundled")
 
     install_ffmpeg()
 
-    # --------------------------------------------------
-    # 9. VERIFY dependencies (NOW they exist)
-    # --------------------------------------------------
     logging.info("[9] Verifying platform dependencies")
     verify_windows_deps()
 
-    # --------------------------------------------------
-    # 10. OTP enrollment (server is running)
-    # --------------------------------------------------
     logging.info("[10] OTP enrollment")
     otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
 
-    # --------------------------------------------------
-    # 11. TPM identity already initialized earlier
-    # --------------------------------------------------
     if IS_WINDOWS:
         logging.info("[11] Creating Windows master secret")
         from installer.security.tpm_seal import create_master_secret_windows
@@ -370,23 +317,14 @@ def main(otp=None, server_addr=None):
         logging.info("[11] Sealing master secret")
         seal_master_secret()
 
-    # --------------------------------------------------
-    # 12. Persist install state
-    # --------------------------------------------------
     logging.info("[12] Persisting install state")
     write_install_state()
 
-    # --------------------------------------------------
-    # 13. Integrity baseline
-    # --------------------------------------------------
     logging.info("[13] Writing integrity baseline")
     write_baseline()
 
-    logging.info("🔥 INSTALLER COMPLETED SUCCESSFULLY")
+    logging.info("INSTALLER COMPLETED SUCCESSFULLY")
 
 
-# --------------------------------------------------
-# Entry
-# --------------------------------------------------
 if __name__ == "__main__":
     main()

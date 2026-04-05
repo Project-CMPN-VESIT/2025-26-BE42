@@ -1,3 +1,11 @@
+"""
+tpm_guard.py
+
+BUG-1 FIX: creationflags=subprocess.CREATE_NO_WINDOW is Windows-only.
+           Using it on Linux raises ValueError and crashes the process.
+           Fixed by only passing creationflags on Windows.
+"""
+
 import subprocess
 from .self_destruct import trigger_self_destruct
 import sys
@@ -6,41 +14,43 @@ import platform
 
 IS_WINDOWS = platform.system().lower() == "windows"
 
-BASE_DIR = Path.home() / ".federated"
-TPM_DIR = BASE_DIR / "tpm"
+BASE_DIR   = Path.home() / ".federated"
+TPM_DIR    = BASE_DIR / "tpm"
 SEALED_CTX = str(TPM_DIR / "sealed_secret.ctx")
 PUBKEY_PEM = TPM_DIR / "device_pubkey.pem"
 
 WINDOWS_SIGNER = BASE_DIR / "bin" / "windows_signer.exe"
 
 
-# --------------------------------------------------
-# SIGN MESSAGE (ECDSA P-256)
-# --------------------------------------------------
+def _subprocess_kwargs(**extra) -> dict:
+    """Return subprocess kwargs with CREATE_NO_WINDOW only on Windows."""
+    kw = dict(extra)
+    if IS_WINDOWS:
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kw
+
+
+# ── SIGN MESSAGE (ECDSA P-256) ────────────────────────────────────────────────
 
 def sign_message(message: bytes) -> bytes:
     if not message:
         trigger_self_destruct("Empty message for signing")
 
-    if IS_WINDOWS and not WINDOWS_SIGNER.exists(): 
+    if IS_WINDOWS and not WINDOWS_SIGNER.exists():
         trigger_self_destruct("Windows TPM signer missing")
-    
-    print("[TPM] Signing message using Windows TPM signer")
-    
+
     try:
         if IS_WINDOWS:
-            # Call Windows CNG signer
             proc = subprocess.run(
                 [str(WINDOWS_SIGNER), "--sign"],
                 input=message,
                 stdout=subprocess.PIPE,
                 check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                **_subprocess_kwargs()
             )
             return proc.stdout
-
         else:
-            # Linux TPM2 tools
+            # BUG-1 FIX: no creationflags on Linux
             proc = subprocess.run(
                 [
                     "tpm2_sign",
@@ -53,7 +63,6 @@ def sign_message(message: bytes) -> bytes:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
             )
             return proc.stdout
 
@@ -61,25 +70,19 @@ def sign_message(message: bytes) -> bytes:
         trigger_self_destruct("TPM signing failed")
 
 
-# --------------------------------------------------
-# UNSEAL MASTER SECRET
-# --------------------------------------------------
+# ── UNSEAL MASTER SECRET ──────────────────────────────────────────────────────
 
 def unseal_master_secret() -> bytes:
     try:
         if IS_WINDOWS:
-            # Windows: no TPM sealing yet
-            # For parity, we will later implement CNG-protected secret
-            # For now: read file-based sealed secret
             secret_path = BASE_DIR / "secrets" / "master.bin"
             if not secret_path.exists():
                 print("[TPM] Master secret missing → creating (first run)")
                 from installer.security.tpm_seal import create_master_secret_windows
                 create_master_secret_windows()
             return secret_path.read_bytes()
-
         else:
-            # Linux TPM
+            # BUG-1 FIX: no creationflags on Linux
             output = subprocess.check_output([
                 "tpm2_unseal",
                 "-c", SEALED_CTX
@@ -92,9 +95,7 @@ def unseal_master_secret() -> bytes:
         trigger_self_destruct("TPM unseal failed (hardware state mismatch)")
 
 
-# --------------------------------------------------
-# GET DEVICE PUBLIC KEY
-# --------------------------------------------------
+# ── GET DEVICE PUBLIC KEY ─────────────────────────────────────────────────────
 
 def get_device_pubkey() -> bytes:
     try:
@@ -105,12 +106,11 @@ def get_device_pubkey() -> bytes:
                 print("[DEBUG] Windows signer missing at:", WINDOWS_SIGNER)
                 return b""
 
-            # Always regenerate if missing
             if not pubkey_file.exists():
                 subprocess.run(
                     [str(WINDOWS_SIGNER), "--pubkey", str(pubkey_file)],
                     check=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    **_subprocess_kwargs()
                 )
 
             if not pubkey_file.exists():

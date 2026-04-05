@@ -740,166 +740,207 @@ def orchestrate(
     input_path: str,
     session_id: str,
     mode: str = "autonomous",
-    device: str = DEFAULT_DEVICE,
+    device: str = None,
     epochs: int = 1,
     batch_size: int = 8,
     lr: float = 2e-5,
     rl_supervised_lambda: float = 0.0,
-    max_samples: Optional[int] = None,
-    safety_params: Dict[str, float] = None,
+    max_samples=None,
+    safety_params=None,
+    global_model_path: str = None,   # ← Phase 10: now an explicit parameter
     **kwargs
 ):
-    rag_k = kwargs.get("rag_k", None)
-    rag_mode = kwargs.get("rag_mode", None)
-
-    if input_path.startswith("file://") and input_path.endswith(".enc"):
-        # Phase-1 fix: root doesn't matter — key is always canonical.
-        # Using the same agent="lda" ensures HKDF context matches what LDA wrote.
-        _CANONICAL_STORE = Path.home() / ".federated" / "data" / "secure_store"
+    """
+    Orchestrate training/inference.
  
-        store = SecureStore(
-            agent="lda",
-            root=_CANONICAL_STORE,
-        )
-
-        manifest_bytes = store.decrypt_read(input_path)
-
+    global_model_path: optional path to a global model state_dict (.pt file)
+                       received from the server.  When provided the model is
+                       initialised from these weights before local fine-tuning,
+                       implementing the federated averaging warm-start.
+    """
+    import os, json, tempfile, torch
+    from pathlib import Path
+    from torch.utils.data import DataLoader
+ 
+    # resolve device
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+ 
+    # ── inline imports so the rest of the file remains unchanged ─────────────
+    from transformers import AutoTokenizer
+ 
+    # These are defined in the same file — import via module self-reference
+    import sys
+    _mod = sys.modules[__name__]
+ 
+    read_parquet_records    = _mod.read_parquet_records
+    MultiModalDataset       = _mod.MultiModalDataset
+    MultiModalModel         = _mod.MultiModalModel
+    collate_batch           = _mod.collate_batch
+    run_inference           = _mod.run_inference
+    train_model             = _mod.train_model
+    rl_update_reinforce     = _mod.rl_update_reinforce
+    compute_state_delta     = _mod.compute_state_delta
+    apply_safety_to_delta   = _mod.apply_safety_to_delta
+    save_encrypted_delta    = _mod.save_encrypted_delta
+    modality_ablation_importance = _mod.modality_ablation_importance
+    physician_feedback_cli  = _mod.physician_feedback_cli
+    SecureStore             = _mod.SecureStore
+    CentralReceiptManager   = _mod.CentralReceiptManager
+    MENTALBERT_PRETRAIN     = _mod.MENTALBERT_PRETRAIN
+    LOCAL_SAVE_DIR          = _mod.LOCAL_SAVE_DIR
+    DEFAULT_MAX_PARAM_CHANGE     = _mod.DEFAULT_MAX_PARAM_CHANGE
+    DEFAULT_MAX_GLOBAL_DELTA_NORM = _mod.DEFAULT_MAX_GLOBAL_DELTA_NORM
+ 
+    # ── load records ──────────────────────────────────────────────────────────
+    if input_path.startswith("file://") and input_path.endswith(".enc"):
+        _CANONICAL_STORE = Path.home() / ".federated" / "data" / "secure_store"
+        store_lda = SecureStore(agent="lda", root=_CANONICAL_STORE)
+        manifest_bytes = store_lda.decrypt_read(input_path)
         with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tf:
             tf.write(manifest_bytes)
             local_manifest_path = tf.name
-
         records = read_parquet_records(local_manifest_path)
     else:
         records = read_parquet_records(input_path)
-
+ 
     if max_samples:
         records = records[:max_samples]
     print(f"[info] loaded {len(records)} records")
-
+ 
     tokenizer = AutoTokenizer.from_pretrained(MENTALBERT_PRETRAIN)
-    ds = MultiModalDataset(records, tokenizer)
-    # infer dims
-    audio_dim = None
+    ds        = MultiModalDataset(records, tokenizer)
+ 
+    # infer modality dims
+    audio_dim  = None
     vision_dim = None
     for r in records:
-        f = r.get("features") or {}
+        f     = r.get("features") or {}
         audio = f.get("audio")
-        if not isinstance(audio, dict):
-            continue
-
-        if isinstance(audio.get("wav2vec2"), list):
-            audio_dim = len(audio["wav2vec2"])
-            break
-
-        numeric_vals = [v for v in audio.values() if isinstance(v, (int, float))]
-        if numeric_vals:
-            audio_dim = len(numeric_vals)
-            break
+        if isinstance(audio, dict):
+            if isinstance(audio.get("wav2vec2"), list):
+                audio_dim = len(audio["wav2vec2"])
+                break
+            numeric = [v for v in audio.values() if isinstance(v, (int, float))]
+            if numeric:
+                audio_dim = len(numeric)
+                break
     for r in records:
         f = r.get("features") or {}
-        if isinstance(f, dict) and "video" in f and isinstance(f["video"], dict) and f["video"].get("densenet"):
-            vision_dim = len(f["video"]["densenet"])
-            break
+        if isinstance(f, dict) and "video" in f and isinstance(f["video"], dict):
+            v = f["video"]
+            if v.get("densenet") and isinstance(v["densenet"], (list, tuple)):
+                vision_dim = len(v["densenet"])
+                break
         if any(k.startswith("neuron_") for k in r.keys()):
-            neuron_keys = sorted([kk for kk in r.keys() if kk.startswith("neuron_")])
-            vision_dim = len(neuron_keys)
+            vision_dim = len(sorted(k for k in r if k.startswith("neuron_")))
             break
-
+ 
     print(f"[info] inferred audio_dim={audio_dim}, vision_dim={vision_dim}")
-
-    model = MultiModalModel(MENTALBERT_PRETRAIN, audio_dim=audio_dim, vision_dim=vision_dim, device=device)
-    model.to(device)
-
-    base_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_batch)
-    preds = run_inference(model, loader, device=device)
-    # attach preds to records for clinician
-    for r, p in zip(records, preds):
-        r["_pred_phq"] = p["pred_phq"]
-        r["_pred_class_probs"] = p["pred_class_probs"]
-
-    # secure store + receipts
-    store = SecureStore(
-        agent="trainer",
-        root=LOCAL_SAVE_DIR,          # Phase-1 fix: LOCAL_SAVE_DIR is already the store root
+ 
+    model = MultiModalModel(
+        MENTALBERT_PRETRAIN,
+        audio_dim=audio_dim,
+        vision_dim=vision_dim,
+        device=device
     )
-    rm = CentralReceiptManager(agent="trainer-agent")
+ 
+    # ── Phase 10: warm-start from global model ────────────────────────────────
+    if global_model_path and Path(global_model_path).exists():
+        try:
+            global_state = torch.load(global_model_path, map_location=device)
+            # Support both raw state_dict and wrapped {"state_dict": ...} formats
+            if isinstance(global_state, dict) and "state_dict" in global_state:
+                global_state = global_state["state_dict"]
+            missing, unexpected = model.load_state_dict(global_state, strict=False)
+            print(
+                f"[FL] Warm-started from global model: "
+                f"{len(missing)} missing keys, {len(unexpected)} unexpected keys"
+            )
+        except Exception as e:
+            print(f"[FL] Warning: could not load global model ({e}) — starting from scratch")
+    else:
+        if global_model_path:
+            print(f"[FL] global_model_path provided but file not found: {global_model_path}")
+        print("[FL] No global model — using random initialisation")
+    # ─────────────────────────────────────────────────────────────────────────
+ 
+    model.to(device)
+    base_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+ 
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_batch)
+    preds  = run_inference(model, loader, device=device)
+    for r, p in zip(records, preds):
+        r["_pred_phq"]         = p["pred_phq"]
+        r["_pred_class_probs"] = p["pred_class_probs"]
+ 
+    store = SecureStore(agent="trainer", root=LOCAL_SAVE_DIR)
+    rm    = CentralReceiptManager(agent="trainer-agent")
  
     if mode == "autonomous":
-        # cheap explainability on first batch
-        sample = None
-        for b in loader:
-            sample = b
-            break
+        sample = next(iter(loader), None)
         explanations = modality_ablation_importance(model, sample, device=device) if sample else {}
-        payload = json.dumps({"preds": preds, "explainability": explanations}, default=float).encode()
-        out_rel = f"{session_id}/inference/results_{os.urandom(6).hex()}.json.enc"
-        out_uri = store.encrypt_write(f"file://{store.root / out_rel}", payload)
-        receipt = rm.create_receipt(
-            agent="trainer-agent",
-            operation="inference",
-            params={"count": len(preds)},
-            outputs=[out_uri],
-            session_id=session_id,
+        payload   = json.dumps({"preds": preds, "explainability": explanations}, default=float).encode()
+        out_rel   = f"{session_id}/inference/results_{os.urandom(6).hex()}.json.enc"
+        out_uri   = store.encrypt_write(f"file://{store.root / out_rel}", payload)
+        receipt   = rm.create_receipt(
+            agent="trainer-agent", operation="inference",
+            params={"count": len(preds)}, outputs=[out_uri], session_id=session_id,
         )
         rrel = f"{session_id}/receipts/inference_{os.urandom(6).hex()}.json.enc"
         ruri = store.encrypt_write(f"file://{store.root / rrel}", json.dumps(receipt).encode())
-        print(f"[done] inference -> {out_uri} (receipt {ruri})")
+        print(f"[done] inference -> {out_uri}")
         return {"inference_uri": out_uri, "receipt_uri": ruri, "explainability": explanations}
-
+ 
     elif mode == "supervised":
-        texts = [r.get("transcript") or r.get("text") or "" for r in records]
+        texts         = [r.get("transcript") or r.get("text") or "" for r in records]
         corrected_phq = physician_feedback_cli(preds, texts)
         for r, cp in zip(records, corrected_phq):
             r["phq_score"] = float(cp)
-        ds_supervised = MultiModalDataset(records, tokenizer)
-        train_result = train_model(ds_supervised, model, output_dir=str(LOCAL_SAVE_DIR),
-                           epochs=epochs, batch_size=batch_size, lr=lr, device=device)
-        model.load_state_dict(torch.load(train_result["model_path"], map_location=device))
-        after = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-        delta = compute_state_delta(base_state, after)
-        # apply safety
+        ds_sup = MultiModalDataset(records, tokenizer)
+        result = train_model(ds_sup, model, output_dir=str(LOCAL_SAVE_DIR),
+                             epochs=epochs, batch_size=batch_size, lr=lr, device=device)
+        model.load_state_dict(torch.load(result["model_path"], map_location=device))
+        after  = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        delta  = compute_state_delta(base_state, after)
         sparams = safety_params or {}
-        max_param_change = sparams.get("max_param_change", DEFAULT_MAX_PARAM_CHANGE)
-        max_global_norm = sparams.get("max_global_norm", DEFAULT_MAX_GLOBAL_DELTA_NORM)
-        delta_safe = apply_safety_to_delta(delta, max_param_change=max_param_change, max_global_norm=max_global_norm)
+        delta_safe = apply_safety_to_delta(
+            delta,
+            max_param_change=sparams.get("max_param_change", DEFAULT_MAX_PARAM_CHANGE),
+            max_global_norm=sparams.get("max_global_norm", DEFAULT_MAX_GLOBAL_DELTA_NORM),
+        )
         update_uri, receipt_uri = save_encrypted_delta(delta_safe, store, session_id, rm)
         print(f"[done] supervised training -> delta saved {update_uri}")
         return {"local_update_uri": update_uri, "update_receipt_uri": receipt_uri}
-
+ 
     elif mode == "rl":
-        # RL mode: we expect clinician corrections available in 'phq_score' fields (or will use interactive)
-        # If missing, fall back to asking clinician interactively.
-        texts = [r.get("transcript") or r.get("text") or "" for r in records]
-        # If no corrections present, collect via CLI; otherwise use values in records
+        texts    = [r.get("transcript") or r.get("text") or "" for r in records]
         need_cli = not any(r.get("phq_score") is not None for r in records)
         if need_cli:
             corrected_phq = physician_feedback_cli(preds, texts)
             for r, cp in zip(records, corrected_phq):
                 r["phq_score"] = float(cp)
         else:
-            # ensure float
             for r in records:
                 r["phq_score"] = float(r.get("phq_score") or r.get("phq") or 0.0)
-
-        # run RL updates (REINFORCE) with optional supervised mixing
         ds_rl = MultiModalDataset(records, tokenizer)
-        model = rl_update_reinforce(model, ds_rl, epochs=epochs, batch_size=1, lr=lr, device=device, supervised_lambda=rl_supervised_lambda)
-
-        after = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
-        delta = compute_state_delta(base_state, after)
+        model = rl_update_reinforce(model, ds_rl, epochs=epochs, batch_size=1,
+                                    lr=lr, device=device,
+                                    supervised_lambda=rl_supervised_lambda)
+        after  = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        delta  = compute_state_delta(base_state, after)
         sparams = safety_params or {}
-        max_param_change = sparams.get("max_param_change", DEFAULT_MAX_PARAM_CHANGE)
-        max_global_norm = sparams.get("max_global_norm", DEFAULT_MAX_GLOBAL_DELTA_NORM)
-        delta_safe = apply_safety_to_delta(delta, max_param_change=max_param_change, max_global_norm=max_global_norm)
+        delta_safe = apply_safety_to_delta(
+            delta,
+            max_param_change=sparams.get("max_param_change", DEFAULT_MAX_PARAM_CHANGE),
+            max_global_norm=sparams.get("max_global_norm", DEFAULT_MAX_GLOBAL_DELTA_NORM),
+        )
         update_uri, receipt_uri = save_encrypted_delta(delta_safe, store, session_id, rm)
         print(f"[done] RL training -> delta saved {update_uri}")
         return {"local_update_uri": update_uri, "update_receipt_uri": receipt_uri}
-
+ 
     else:
         raise ValueError("mode must be 'autonomous'|'supervised'|'rl'")
-
 
 # ---------- CLI ----------
 def main():

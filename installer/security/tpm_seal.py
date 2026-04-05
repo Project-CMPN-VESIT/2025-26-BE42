@@ -1,35 +1,45 @@
+"""
+tpm_seal.py
+
+BUG-2 FIX: _run() passed creationflags=subprocess.CREATE_NO_WINDOW unconditionally.
+           That flag is Windows-only; it raises ValueError on Linux/macOS.
+           Fixed: creationflags only added when running on Windows.
+"""
+
 import os
 import sys
 import subprocess
 from pathlib import Path
+import platform
 import secrets
 
-BASE_DIR = Path.home() / ".federated"
-TPM_DIR = BASE_DIR / "tpm"
+IS_WINDOWS = platform.system().lower() == "windows"
+
+BASE_DIR    = Path.home() / ".federated"
+TPM_DIR     = BASE_DIR / "tpm"
 SECRETS_DIR = BASE_DIR / "secrets"
 
-SEALED_OBJ = TPM_DIR / "sealed_secret.ctx"
+SEALED_OBJ  = TPM_DIR / "sealed_secret.ctx"
 SECRET_PLAIN = SECRETS_DIR / "master.bin"
 
-# PCRs we bind to (secure defaults)
 PCRS = "sha256:0,2,4,7"
 
 
 def _run(cmd):
-    subprocess.run(
-        cmd,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW
-    )
+    """Run a subprocess, suppressing output. Uses CREATE_NO_WINDOW only on Windows."""
+    kwargs = {
+        "check": True,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if IS_WINDOWS:
+        # BUG-2 FIX: guard with IS_WINDOWS check
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subprocess.run(cmd, **kwargs)
 
 
 def seal_master_secret():
-    """
-    Generates and seals a master secret to TPM PCRs.
-    This runs ONCE.
-    """
+    """Generate and seal a master secret to TPM PCRs. Runs ONCE."""
     TPM_DIR.mkdir(parents=True, exist_ok=True)
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -59,7 +69,7 @@ def seal_master_secret():
         "-c", str(SEALED_OBJ)
     ])
 
-    # Destroy plaintext
+    # Destroy plaintext immediately
     SECRET_PLAIN.unlink()
 
     for f in ["sealed.pub", "sealed.priv"]:
@@ -69,7 +79,9 @@ def seal_master_secret():
 
     print("[TPM] Master secret sealed successfully")
 
+
 def create_master_secret_windows():
+    """Windows fallback: store master secret as a file (no TPM sealing)."""
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
 
     if SECRET_PLAIN.exists():
@@ -80,29 +92,23 @@ def create_master_secret_windows():
     secret = secrets.token_bytes(32)
     SECRET_PLAIN.write_bytes(secret)
 
-def unseal_master_secret() -> bytes:
-    """
-    Unseals secret ONLY if exists.
-    If not → creates + seals (FIRST RUN FIX)
-    """
 
+def unseal_master_secret() -> bytes:
+    """Unseal secret. Creates + seals on first run if missing."""
     if not SEALED_OBJ.exists():
         print("[TPM] No sealed secret found → creating new one")
         seal_master_secret()
 
     try:
         print("[TPM] Unsealing master secret")
-
+        # BUG-2 FIX: no creationflags here — tpm2_unseal is Linux-only
         output = subprocess.check_output([
             "tpm2_unseal",
             "-c", str(SEALED_OBJ)
         ])
-
         if not output:
             raise RuntimeError("Empty TPM output")
-
         return output
-
     except Exception as e:
         print("[TPM] Unseal failed:", e)
         sys.exit("[SECURITY] TPM unseal failed")

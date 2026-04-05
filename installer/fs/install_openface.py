@@ -1,18 +1,30 @@
+"""
+install_openface.py
+
+BUG-4 FIX: SRC was pointing to the opensmile directory instead of OpenFace.
+           Fixed: SRC now correctly points to the OpenFace payload.
+"""
+
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 BASE = Path.home() / ".federated"
-DST = BASE / "deps" / "windows" / "OpenFace"
+DST  = BASE / "deps" / "windows" / "OpenFace"
+
 
 def get_installer_root() -> Path:
     if getattr(sys, 'frozen', False):
         return Path(sys._MEIPASS)
     return Path(__file__).resolve().parents[1]
 
+
 INSTALLER_ROOT = get_installer_root()
-SRC = INSTALLER_ROOT / "runtime" / "deps" / "windows" / "opensmile"
+
+# BUG-4 FIX: was pointing to "opensmile" — corrected to "OpenFace"
+SRC = INSTALLER_ROOT / "runtime" / "deps" / "windows" / "OpenFace"
+
 
 def install_openface():
     if DST.exists():
@@ -20,12 +32,13 @@ def install_openface():
         return
 
     if not SRC.exists():
-        sys.exit("[FATAL] OpenFace payload missing")
+        sys.exit(f"[FATAL] OpenFace payload missing at: {SRC}")
 
-    print("[STEP 5] Installing OpenFace")
+    print("[STEP] Installing OpenFace")
 
     shutil.copytree(SRC, DST)
 
+    # Run model download script if present (Windows only)
     ps1 = DST / "download_models.ps1"
     if ps1.exists():
         subprocess.run(
@@ -40,6 +53,6 @@ def install_openface():
 
     exe = DST / "FeatureExtraction.exe"
     if not exe.exists():
-        sys.exit("[FATAL] FeatureExtraction.exe missing")
+        sys.exit("[FATAL] FeatureExtraction.exe missing after OpenFace install")
 
     print("[OK] OpenFace installed")

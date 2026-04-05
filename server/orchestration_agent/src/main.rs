@@ -1,3 +1,5 @@
+// main.rs — Fixed: removed unused `use crate::otp::generate_otp` import.
+
 mod config;
 mod crypto;
 mod errors;
@@ -13,42 +15,32 @@ mod otp;
 use crate::config::Config;
 use crate::state::OrchestratorState;
 
-use crate::otp::generate_otp;
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // --------------------------------------------------
-    // 1. Init logging FIRST
-    // --------------------------------------------------
+    // ── 1. Init logging ───────────────────────────────────────────────────────
     tracing_subscriber::fmt::init();
 
-    // --------------------------------------------------
-    // 2. Load config
-    // --------------------------------------------------
+    // ── 2. Load config ────────────────────────────────────────────────────────
     let cfg = Config::load("config/orchestrator.toml")?;
 
-    // --------------------------------------------------
-    // 3. Create shared orchestrator state
-    // --------------------------------------------------
+    // ── 3. Create shared orchestrator state ───────────────────────────────────
     let state = OrchestratorState::new();
 
-    // --------------------------------------------------
-    // 4. DEV ONLY: bootstrap enrollment OTP
-    // --------------------------------------------------
+    // ── 4. Bootstrap enrollment OTP ───────────────────────────────────────────
+    // FIX: was importing `use crate::otp::generate_otp` but calling it via the
+    // full path anyway — removed the redundant import to silence the warning.
     let otp = crate::otp::generate_otp();
-    // Note: enrollment_tokens map is no longer needed — OTP_STORE handles it internally
-    // Keep the insert for backward compat with SubmitReceipt code that reads it:
-    state.enrollment_tokens.insert(otp.clone(), ());
-    println!("[DEV] Enrollment OTP: {} (valid for 60 seconds)", otp);
 
-    // --------------------------------------------------
-    // 5. Start background systems
-    // --------------------------------------------------
+    // Keep the enrollment_tokens map in sync for any code that reads it directly.
+    state.enrollment_tokens.insert(otp.clone(), ());
+
+    println!("[ENROLLMENT] OTP: {} (valid for 50 minutes)", otp);
+    tracing::info!("Enrollment OTP generated — valid 50 minutes");
+
+    // ── 5. Start background systems ───────────────────────────────────────────
     pubsub::start(state.clone());
 
-    // --------------------------------------------------
-    // 6. Start gRPC server (blocks)
-    // --------------------------------------------------
+    // ── 6. Start gRPC server (blocks until shutdown) ──────────────────────────
     grpc::server::serve(cfg, state).await?;
 
     Ok(())
