@@ -72,8 +72,8 @@ class SecureStore:
         p = Path(uri[len("file://"):])
         p.parent.mkdir(parents=True, exist_ok=True)
 
-        context_path = Path(p.parent).resolve()
-        root_path = self.root.resolve()
+        print("[DEBUG WRITE FILE]", p.resolve())
+        print("[DEBUG WRITE SIZE]", len(data))
 
         context = str(Path(uri[len("file://"):]).parent.name)
         if "local_updates" in context:
@@ -95,6 +95,9 @@ class SecureStore:
     def decrypt_read(self, uri: str) -> bytes:
         assert uri.startswith("file://"), "URI must start with file://"
         p = Path(uri[len("file://"):])
+        print("[DEBUG READ FILE]", p.resolve())
+        print("[DEBUG FILE EXISTS]", p.exists())
+        print("[DEBUG FILE SIZE]", p.stat().st_size if p.exists() else "NA")
 
         payload = json.loads(p.read_text())
         nonce = base64.b64decode(payload["nonce"])
