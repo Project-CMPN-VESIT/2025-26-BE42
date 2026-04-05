@@ -2,7 +2,7 @@
 pydantic==1.10.13
 PyYAML==6.0.2
 typing_extensions==4.14.1
-dotenv
+python-dotenv==1.0.1
 
 # API / Server
 fastapi==0.116.1
