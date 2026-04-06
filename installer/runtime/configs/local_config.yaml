@@ -43,7 +43,7 @@ ingest:
     enabled: true
     source: "asr"
     # whisper model name (used when openai-whisper package IS installed)
-    asr_model: "small"
+    asr_model: "openai/whisper-small"
     # HuggingFace model ID (used as fallback when openai-whisper is NOT installed)
     asr_hf_model: "openai/whisper-small"
     offline: true
@@ -94,7 +94,7 @@ text_pipe:
   # "whisper" uses openai-whisper package; "hf" uses transformers pipeline
   asr_backend: "whisper"
   # Whisper model name (tiny/base/small/medium/large)
-  asr_model: "small"
+  asr_model: "openai/whisper-small"
   # HuggingFace model ID used as fallback when whisper package is unavailable
   asr_hf_model: "openai/whisper-small"
   ner_scrub: ["PERSON", "GPE", "ORG"]

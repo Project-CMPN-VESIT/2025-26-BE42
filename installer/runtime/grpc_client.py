@@ -1,10 +1,12 @@
 """
 grpc_client.py — Dual channel mTLS implementation
 
-Phase 3:  Two-channel design (enrollment vs operational)
-Phase 4:  ssl_target_name_override REMOVED — certs now have proper SAN.
-          Run gen_certs.sh <SERVER_IP> to regenerate if needed.
-Phase 9:  Exponential backoff retry on transient errors.
+Phase 3:  Two-channel design — enrollment (server-TLS) and operational (mTLS).
+Phase 4:  Server certificate MUST have a Subject Alternative Name (SAN) for
+          the server's IP address. Regenerate with:
+              bash certs/gen_certs.sh <SERVER_IP>
+          then copy certs/ca.pem to installer/runtime/keys/ca.pem and reinstall.
+Phase 9:  Exponential backoff retry on transient gRPC errors.
 """
 
 import grpc
@@ -26,17 +28,12 @@ _CA_PEM      = KEYS / "ca.pem"
 _CLIENT_KEY  = KEYS / "client.key"
 _CLIENT_CERT = KEYS / "client.pem"
 
-# ── Phase 4: NO more ssl_target_name_override ─────────────────────────────────
-# Server certificate MUST have a SAN for the server IP.
-# Regenerate with:  bash certs/gen_certs.sh <SERVER_IP>
-# then copy certs/ca.pem → installer/runtime/keys/ca.pem and reinstall.
+# Phase 4: Channel options — no hostname override needed when certs have correct SAN.
 _CHANNEL_OPTIONS = [
     ("grpc.keepalive_time_ms",              10_000),
     ("grpc.keepalive_timeout_ms",            5_000),
     ("grpc.keepalive_permit_without_calls",      1),
     ("grpc.http2.max_pings_without_data",        0),
-    # REMOVED: grpc.ssl_target_name_override
-    # REMOVED: grpc.default_authority
 ]
 
 _MAX_RETRY    = 5
@@ -79,8 +76,8 @@ def _with_retry(fn, *args, **kwargs):
 
 def create_enrollment_channel(server_addr: str) -> grpc.Channel:
     """
-    Phase 3 — Channel 1: server-TLS only (no client cert).
-    Used during installation/first enrollment when client cert doesn't exist yet.
+    Phase 3 — Channel 1: server-TLS only (no client certificate).
+    Used during installation when the device does not yet have a signed cert.
     """
     if not _CA_PEM.exists():
         raise FileNotFoundError(f"CA certificate not found: {_CA_PEM}")
@@ -90,14 +87,14 @@ def create_enrollment_channel(server_addr: str) -> grpc.Channel:
     )
     channel = grpc.secure_channel(server_addr, creds, options=_CHANNEL_OPTIONS)
     _wait_ready(channel)
-    log.info("[gRPC] Enrollment channel ready → %s", server_addr)
+    log.info("[gRPC] Enrollment channel ready -> %s", server_addr)
     return channel
 
 
 def create_mtls_channel(server_addr: str) -> grpc.Channel:
     """
-    Phase 3 — Channel 2: full mTLS (client cert + server cert).
-    Used for all operational calls after device is enrolled.
+    Phase 3 — Channel 2: full mutual TLS (client cert + server cert).
+    Used for all operational calls after device enrollment.
     """
     for p in [_CA_PEM, _CLIENT_KEY, _CLIENT_CERT]:
         if not p.exists():
@@ -113,7 +110,7 @@ def create_mtls_channel(server_addr: str) -> grpc.Channel:
     )
     channel = grpc.secure_channel(server_addr, creds, options=_CHANNEL_OPTIONS)
     _wait_ready(channel)
-    log.info("[gRPC] mTLS channel ready → %s", server_addr)
+    log.info("[gRPC] mTLS channel ready -> %s", server_addr)
     return channel
 
 
@@ -124,12 +121,12 @@ def create_grpc_stub(server_addr: str) -> OrchestratorStub:
     """
     try:
         channel = create_mtls_channel(server_addr)
-        log.info("[gRPC] Using full mTLS")
+        log.info("[gRPC] Using full mutual TLS")
     except FileNotFoundError as e:
         log.warning("[gRPC] Client cert absent, falling back to server-TLS: %s", e)
         try:
             channel = create_enrollment_channel(server_addr)
-            log.warning("[gRPC] Using server-TLS only (enroll this device first)")
+            log.warning("[gRPC] Using server-TLS only — enroll this device first")
         except Exception as inner:
             trigger_self_destruct(f"Cannot establish any gRPC channel: {inner}")
 

@@ -2,11 +2,10 @@
 """
 installer_core.py
 
-Phase 4: ssl_target_name_override removed from otp_enrollment — server cert now
-         has proper IP SAN so no hostname override is needed.
-BUG-3:   Fixed logging.info() calls that passed extra positional args without %s
-         (logging.info("msg:", val) silently drops val; correct form is
-          logging.info("msg: %s", val)).
+Phase 4: otp_enrollment now connects with plain ssl_channel_credentials and the
+         server's correct IP SAN cert. No hostname override option is set.
+BUG-3:   All logging calls now pass values through the %s positional placeholder
+         in the format string rather than as bare extra arguments.
 """
 
 import sys
@@ -137,7 +136,7 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
     with open(client_csr, "wb") as f:
         f.write(csr_bytes)
 
-    # ── Phase 4: NO ssl_target_name_override ──────────────────────────────────
+    # ── Phase 4: server cert has IP SAN — plain TLS works without any override ──
     # Server cert has IP SAN — standard TLS validation works correctly.
     creds = grpc.ssl_channel_credentials(
         root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
@@ -145,7 +144,7 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
 
     logging.info("STEP 10: STARTING ENROLLMENT")
 
-    # Phase 4 fix: removed grpc.ssl_target_name_override and grpc.default_authority
+        # Phase 4: only keepalive options — no hostname override needed.
     channel = grpc.secure_channel(
         server_addr,
         creds,

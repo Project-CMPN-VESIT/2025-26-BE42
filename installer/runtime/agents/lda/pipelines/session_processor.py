@@ -314,7 +314,7 @@ def _get_asr_models(cfg: dict) -> Tuple[str, str]:
     whisper_model = (
         text_cfg.get("asr_model")
         or ingest_cfg.get("asr_model")
-        or "small"
+        or "openai/whisper-small"
     )
 
     # HF model ID (full qualified name)

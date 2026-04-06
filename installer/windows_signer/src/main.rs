@@ -1,6 +1,7 @@
 // windows_signer/src/main.rs
-// BUG-5 FIX: cmd_pubkey had `.map_err(|e| Error::from_win32())` where `e` is
-//            unused, triggering a Rust warning. Changed to `|_|`.
+//
+// BUG-5: cmd_pubkey previously used an unused closure variable in map_err.
+//        Fixed: changed the closure parameter to the wildcard discard pattern.
 
 use std::io::{Read, Write};
 use windows::core::*;
@@ -52,8 +53,7 @@ fn cmd_init() -> Result<()> {
 
 fn cmd_pubkey(out_path: &str) -> Result<()> {
     let pem_bytes = export_public_key_pem()?;
-    // BUG-5 FIX: was `|e| Error::from_win32()` — `e` was unused.
-    //            Changed to `|_|` to silence the warning.
+    // Use wildcard discard |_| so the unused io::Error is not flagged by rustc.
     std::fs::write(out_path, &pem_bytes)
         .map_err(|_| Error::from_win32())?;
     eprintln!("[OK] Public key written to {}", out_path);
@@ -163,6 +163,7 @@ fn export_public_key_pem() -> Result<Vec<u8>> {
         ec_point.extend_from_slice(x);
         ec_point.extend_from_slice(y);
 
+        // SPKI DER: SEQUENCE { SEQUENCE { OID id-ecPublicKey, OID prime256v1 } BIT STRING }
         let spki_prefix: [u8; 26] = [
             0x30, 0x59,
             0x30, 0x13,
