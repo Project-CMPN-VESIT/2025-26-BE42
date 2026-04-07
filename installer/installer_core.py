@@ -2,10 +2,12 @@
 """
 installer_core.py
 
-Phase 4: otp_enrollment now connects with plain ssl_channel_credentials and the
-         server's correct IP SAN cert. No hostname override option is set.
-BUG-3:   All logging calls now pass values through the %s positional placeholder
-         in the format string rather than as bare extra arguments.
+Phase 4: otp_enrollment uses plain ssl_channel_credentials with the server's
+         IP SAN cert. No hostname override is needed or set.
+BUG-3:   All logging calls use the %s positional placeholder.
+FIX-ENR: otp_enrollment now has a TCP pre-flight check before TLS, catches
+         grpc.FutureTimeoutError explicitly, and logs all failure paths so
+         the cause is always visible in the log file.
 """
 
 import sys
@@ -14,6 +16,7 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
 import json
+import socket
 import grpc
 import platform
 from pathlib import Path
@@ -55,7 +58,7 @@ BASE_DIR   = Path.home() / ".federated"
 STATE_FILE = BASE_DIR / "state" / "install_state.json"
 KEYS_DIR   = BASE_DIR / "keys"
 
-INSTALLER_OTP        = None
+INSTALLER_OTP         = None
 INSTALLER_SERVER_ADDR = None
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -88,29 +91,72 @@ def write_install_state():
     STATE_FILE.chmod(0o600)
 
 
+# ── TCP pre-flight check ──────────────────────────────────────────────────────
+
+def _tcp_reachable(host: str, port: int, timeout: float = 5.0) -> bool:
+    """
+    Check whether host:port accepts a TCP connection.
+    This happens BEFORE TLS so we can tell 'server down' from 'cert mismatch'.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError as e:
+        logging.warning("[TCP] Pre-check failed for %s:%d — %s", host, port, e)
+        return False
+
+
+def _parse_addr(server_addr: str):
+    """Split 'host:port' into (host, int_port). Handles IPv6 brackets too."""
+    if server_addr.startswith("["):
+        bracket_end = server_addr.index("]")
+        host = server_addr[1:bracket_end]
+        port = int(server_addr[bracket_end + 2:])
+    elif ":" in server_addr:
+        parts = server_addr.rsplit(":", 1)
+        host, port = parts[0], int(parts[1])
+    else:
+        host, port = server_addr, 50051
+    return host, port
+
+
+# ── OTP enrollment ────────────────────────────────────────────────────────────
+
 def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
-    # BUG-3 FIX: logging.info with %s formatter, not bare positional args
     logging.info("[DEBUG] OTP received by installer: %s", token)
     logging.info("[DEBUG] SERVER_ADDR = %s", server_addr)
     logging.info("[DEBUG] CA exists: %s", (KEYS_DIR / "ca.pem").exists())
-    logging.info("[DEBUG] About to create gRPC channel")
 
     token = token.strip()
-
     if len(token) < 6:
-        sys.exit("[SECURITY] Invalid OTP")
+        sys.exit("[SECURITY] Invalid OTP — must be at least 6 characters")
 
+    # ── 1. TCP pre-flight — fail fast with clear message ─────────────────────
+    try:
+        host, port = _parse_addr(server_addr)
+    except Exception as e:
+        logging.error("[ENROLL] Cannot parse server address %r: %s", server_addr, e)
+        sys.exit(f"[ENROLL] Bad server address: {server_addr}")
+
+    logging.info("[ENROLL] TCP pre-check → %s:%d", host, port)
+    if not _tcp_reachable(host, port, timeout=5.0):
+        msg = (
+            f"[ENROLL] Cannot reach server at {host}:{port}.\n"
+            f"  — Is the Rust orchestrator running on the server?\n"
+            f"  — Is port {port} open in the firewall?\n"
+            f"  — Is the server address correct? (got: {server_addr})"
+        )
+        logging.error(msg)
+        sys.exit(msg)
+
+    logging.info("[ENROLL] TCP pre-check OK — server is reachable at %s:%d", host, port)
+
+    # ── 2. Key + CSR generation ───────────────────────────────────────────────
     KEYS_DIR.mkdir(parents=True, exist_ok=True)
-
     client_key = KEYS_DIR / "client.key"
     client_csr = KEYS_DIR / "client.csr"
 
-    # Generate private key
-    key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     with open(client_key, "wb") as f:
         f.write(
             key.private_bytes(
@@ -120,31 +166,30 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
             )
         )
 
-    # Create CSR
     csr = (
         x509.CertificateSigningRequestBuilder()
-        .subject_name(
-            x509.Name([
-                x509.NameAttribute(NameOID.COMMON_NAME, u"federated-device"),
-            ])
-        )
+        .subject_name(x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, u"federated-device"),
+        ]))
         .sign(key, hashes.SHA256())
     )
-
-    csr_bytes = csr.public_bytes(serialization.Encoding.PEM)
-
     with open(client_csr, "wb") as f:
-        f.write(csr_bytes)
+        f.write(csr.public_bytes(serialization.Encoding.PEM))
 
-    # ── Phase 4: server cert has IP SAN — plain TLS works without any override ──
-    # Server cert has IP SAN — standard TLS validation works correctly.
+    # ── 3. Build gRPC TLS channel ─────────────────────────────────────────────
+    ca_pem = KEYS_DIR / "ca.pem"
+    if not ca_pem.exists():
+        msg = (
+            f"[ENROLL] CA certificate not found at {ca_pem}.\n"
+            f"  Run: bash certs/gen_certs.sh {host}\n"
+            f"  Then copy certs/ca.pem → installer/runtime/keys/ca.pem and rebuild."
+        )
+        logging.error(msg)
+        sys.exit(msg)
+
     creds = grpc.ssl_channel_credentials(
-        root_certificates=(KEYS_DIR / "ca.pem").read_bytes()
+        root_certificates=ca_pem.read_bytes()
     )
-
-    logging.info("STEP 10: STARTING ENROLLMENT")
-
-        # Phase 4: only keepalive options — no hostname override needed.
     channel = grpc.secure_channel(
         server_addr,
         creds,
@@ -154,36 +199,85 @@ def otp_enrollment(device_pubkey: bytes, token: str, server_addr: str):
         ]
     )
 
-    logging.info("[DEBUG] Waiting for channel ready...")
-    grpc.channel_ready_future(channel).result(timeout=10)
-    logging.info("[DEBUG] Channel READY")
-
-    stub = OrchestratorStub(channel)
-    logging.info("[DEBUG] gRPC channel created")
+    # ── 4. Wait for channel ready — explicit timeout + error logging ──────────
+    logging.info("STEP 10: STARTING ENROLLMENT")
+    logging.info("[ENROLL] Waiting for TLS channel ready (timeout=15s)...")
 
     try:
-        logging.info("[DEBUG] Sending EnrollDevice RPC")
+        grpc.channel_ready_future(channel).result(timeout=15)
+        logging.info("[ENROLL] TLS channel READY")
+    except grpc.FutureTimeoutError:
+        channel.close()
+        msg = (
+            f"[ENROLL] TLS handshake timed out connecting to {server_addr}.\n"
+            f"  Most likely causes:\n"
+            f"  1. The CA certificate on the client does not match the server's CA.\n"
+            f"     Regenerate: bash certs/gen_certs.sh {host}\n"
+            f"     Copy: certs/ca.pem → installer/runtime/keys/ca.pem, then rebuild.\n"
+            f"  2. The server certificate has no SAN for {host}.\n"
+            f"     Check: openssl x509 -in certs/server.pem -noout -ext subjectAltName\n"
+            f"  3. The Rust server started but TLS config is wrong."
+        )
+        logging.error(msg)
+        sys.exit(msg)
+    except Exception as e:
+        channel.close()
+        msg = f"[ENROLL] gRPC channel error: {type(e).__name__}: {e}"
+        logging.error(msg)
+        sys.exit(msg)
+
+    # ── 5. Send EnrollDevice RPC ──────────────────────────────────────────────
+    stub = OrchestratorStub(channel)
+    logging.info("[ENROLL] Sending EnrollDevice RPC...")
+
+    try:
         resp = stub.EnrollDevice(
             EnrollRequest(
                 enrollment_token=token,
                 device_pubkey=device_pubkey,
                 csr=client_csr.read_bytes(),
             ),
-            timeout=10
+            timeout=15
         )
         logging.info("STEP 10: ENROLLMENT COMPLETED")
+    except grpc.RpcError as e:
+        channel.close()
+        code = e.code()
+        details = e.details()
+        if code == grpc.StatusCode.PERMISSION_DENIED:
+            msg = (
+                f"[ENROLL] Server rejected OTP: {details}\n"
+                f"  The OTP may have expired (valid 60 seconds) or is incorrect.\n"
+                f"  Generate a new OTP from the server console and retry."
+            )
+        elif code == grpc.StatusCode.UNAVAILABLE:
+            msg = (
+                f"[ENROLL] Server unavailable: {details}\n"
+                f"  The server may have crashed or restarted. Check server logs."
+            )
+        else:
+            msg = f"[ENROLL] gRPC RpcError ({code}): {details}"
+        logging.error(msg)
+        sys.exit(msg)
     except Exception as e:
-        logging.error("[ERROR] gRPC failed: %s", e)
+        channel.close()
+        msg = f"[ENROLL] Unexpected error during EnrollDevice: {type(e).__name__}: {e}"
+        logging.error(msg)
         raise
+    finally:
+        try:
+            channel.close()
+        except Exception:
+            pass
 
     if not resp.ok:
-        sys.exit("[SECURITY] Enrollment failed")
+        sys.exit("[SECURITY] Enrollment failed — server returned ok=False")
 
     client_cert_path = KEYS_DIR / "client.pem"
     client_cert_path.write_bytes(resp.client_cert)
     client_cert_path.chmod(0o600)
 
-    logging.info("[OK] Device enrolled + client certificate installed")
+    logging.info("[ENROLL] Device enrolled — client certificate installed at %s", client_cert_path)
 
 
 def create_venv():
@@ -238,7 +332,7 @@ def main(otp=None, server_addr=None):
     INSTALLER_OTP         = otp
     INSTALLER_SERVER_ADDR = server_addr
 
-    logging.info("=== BUILD VERSION 3 — Phase 4 SAN + logging fixes ===")
+    logging.info("=== BUILD VERSION 4 — enrollment diagnostics ===")
 
     logging.info("[1] Anti-debug (installer mode)")
     anti_debug(strict=True, installer_mode=True)
@@ -306,7 +400,13 @@ def main(otp=None, server_addr=None):
     verify_windows_deps()
 
     logging.info("[10] OTP enrollment")
-    otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
+    try:
+        otp_enrollment(device_pubkey, INSTALLER_OTP, INSTALLER_SERVER_ADDR)
+    except SystemExit:
+        raise   # already logged with clear message above
+    except Exception as e:
+        logging.error("[10] Enrollment raised unexpected exception: %s", e, exc_info=True)
+        raise
 
     if IS_WINDOWS:
         logging.info("[11] Creating Windows master secret")

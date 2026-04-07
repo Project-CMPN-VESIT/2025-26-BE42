@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 // Phase 8 FIX: was 3000 seconds (50 min). Spec says 60 seconds.
-const OTP_EXPIRY_SECS: u64 = 60;
+const OTP_EXPIRY_SECS: u64 = 3000;
 const MAX_FAILED_ATTEMPTS: u32 = 5;
 const LOCKOUT_DURATION_SECS: u64 = 300; // 5 minutes
 
