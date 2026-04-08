@@ -262,13 +262,18 @@ def read_parquet_records(path: str) -> List[Dict[str, Any]]:
                 # decrypt parquet
                 parquet_bytes = store.decrypt_read(enc_uri)
 
-                with tempfile.NamedTemporaryFile(suffix=".parquet") as tf:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".parquet") as tf:
                     tf.write(parquet_bytes)
-                    tf.flush()
+                    temp_path = tf.name
 
-                    table = pq.read_table(tf.name)
-                    df = table.to_pandas()
-                    rows.append(df.iloc[row_idx].to_dict())
+                # 🔥 IMPORTANT: file is CLOSED here
+
+                table = pq.read_table(temp_path)
+
+                # cleanup
+                os.remove(temp_path)
+                df = table.to_pandas()
+                rows.append(df.iloc[row_idx].to_dict())
 
         records = rows
     elif p.suffix == ".parquet":
