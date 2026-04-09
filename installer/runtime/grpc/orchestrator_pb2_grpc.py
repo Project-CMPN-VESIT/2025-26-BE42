@@ -29,6 +29,11 @@ class OrchestratorStub(object):
                 request_serializer=orchestrator__pb2.Receipt.SerializeToString,
                 response_deserializer=orchestrator__pb2.Ack.FromString,
                 )
+        self.RequestEnrollment = channel.unary_unary(
+                '/orchestrator.Orchestrator/RequestEnrollment',
+                request_serializer=orchestrator__pb2.EnrollmentRequest.SerializeToString,
+                response_deserializer=orchestrator__pb2.EnrollmentRequestAck.FromString,
+                )
         self.EnrollDevice = channel.unary_unary(
                 '/orchestrator.Orchestrator/EnrollDevice',
                 request_serializer=orchestrator__pb2.EnrollRequest.SerializeToString,
@@ -57,8 +62,18 @@ class OrchestratorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RequestEnrollment(self, request, context):
+        """Phase 1 of enrollment: client announces itself; server generates a
+        per-device OTP and prints it to the admin console.  No OTP is needed
+        to call this RPC — only device_pubkey and csr.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def EnrollDevice(self, request, context):
-        """✅ Enrollment RPC MUST be inside service
+        """Phase 2 of enrollment: client submits the OTP obtained out-of-band
+        from the administrator.  Server verifies OTP, signs CSR, returns cert.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -81,6 +96,11 @@ def add_OrchestratorServicer_to_server(servicer, server):
                     servicer.SubmitReceipt,
                     request_deserializer=orchestrator__pb2.Receipt.FromString,
                     response_serializer=orchestrator__pb2.Ack.SerializeToString,
+            ),
+            'RequestEnrollment': grpc.unary_unary_rpc_method_handler(
+                    servicer.RequestEnrollment,
+                    request_deserializer=orchestrator__pb2.EnrollmentRequest.FromString,
+                    response_serializer=orchestrator__pb2.EnrollmentRequestAck.SerializeToString,
             ),
             'EnrollDevice': grpc.unary_unary_rpc_method_handler(
                     servicer.EnrollDevice,
@@ -145,6 +165,23 @@ class Orchestrator(object):
         return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/SubmitReceipt',
             orchestrator__pb2.Receipt.SerializeToString,
             orchestrator__pb2.Ack.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def RequestEnrollment(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/RequestEnrollment',
+            orchestrator__pb2.EnrollmentRequest.SerializeToString,
+            orchestrator__pb2.EnrollmentRequestAck.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

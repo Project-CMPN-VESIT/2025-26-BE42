@@ -4,10 +4,18 @@ use crate::round::{Round, RoundState};
 
 pub type DeviceId = Vec<u8>;
 
+/// device_fingerprint -> (device_pubkey_bytes, csr_bytes)
+pub type PendingEnrollment = (Vec<u8>, Vec<u8>);
+
 pub struct OrchestratorState {
-    pub devices: DashMap<DeviceId, Vec<u8>>, // device_id -> pubkey
+    /// Registered devices: device_id (SHA-256 of pubkey) → pubkey bytes
+    pub devices: DashMap<DeviceId, Vec<u8>>,
+    /// Active federated rounds
     pub rounds: DashMap<u64, Round>,
+    /// Legacy: single enrollment tokens (kept for backward compat)
     pub enrollment_tokens: DashMap<String, ()>,
+    /// Multi-device pending enrollments: fingerprint (8-byte hex) → (pubkey, csr)
+    pub pending_enrollments: DashMap<String, PendingEnrollment>,
 }
 
 impl OrchestratorState {
@@ -16,6 +24,7 @@ impl OrchestratorState {
             devices: DashMap::new(),
             rounds: DashMap::new(),
             enrollment_tokens: DashMap::new(),
+            pending_enrollments: DashMap::new(),
         });
 
         s.rounds.insert(1, Round {
@@ -32,4 +41,3 @@ impl OrchestratorState {
         s
     }
 }
-

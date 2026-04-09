@@ -6,7 +6,13 @@ service Orchestrator {
   rpc GetRound (DeviceId) returns (RoundMetadata);
   rpc SubmitReceipt (Receipt) returns (Ack);
 
-  // ✅ Enrollment RPC MUST be inside service
+  // Phase 1 of enrollment: client announces itself; server generates a
+  // per-device OTP and prints it to the admin console.  No OTP is needed
+  // to call this RPC — only device_pubkey and csr.
+  rpc RequestEnrollment (EnrollmentRequest) returns (EnrollmentRequestAck);
+
+  // Phase 2 of enrollment: client submits the OTP obtained out-of-band
+  // from the administrator.  Server verifies OTP, signs CSR, returns cert.
   rpc EnrollDevice (EnrollRequest) returns (EnrollResponse);
 }
 
@@ -38,7 +44,6 @@ message Receipt {
   bytes payload_hash = 3;
   double epsilon_spent = 4;
   bytes signature = 5;
-
   string enc_uri = 6;
   string scheme = 7;
   string nonce = 8;
@@ -48,6 +53,24 @@ message Ack {
   bool ok = 1;
 }
 
+// ── New: enrollment request (phase 1, no OTP required) ───────────────────────
+message EnrollmentRequest {
+  // Device's TPM-backed public key (PEM encoded)
+  bytes device_pubkey = 1;
+  // Certificate Signing Request (PEM encoded)
+  bytes csr = 2;
+  // Human-readable device info shown to the admin (e.g. "Win11/HOSTNAME")
+  string device_info = 3;
+}
+
+message EnrollmentRequestAck {
+  // true = request received; admin will see OTP on the server console
+  bool accepted = 1;
+  // Stable identifier the admin can use to match device → OTP
+  string device_fingerprint = 2;
+}
+
+// ── Existing: enrollment completion (phase 2, OTP required) ──────────────────
 message EnrollRequest {
   string enrollment_token = 1;
   bytes device_pubkey = 2;
