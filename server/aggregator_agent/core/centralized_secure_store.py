@@ -114,7 +114,10 @@ class SecureStore:
         assert uri.startswith("file://"), "URI must start with file://"
         assert data, "Refusing to encrypt empty payload"
 
-        p = Path(uri[len("file://"):])
+        p = Path(uri[len("file://"):]).resolve()
+
+        if not str(p).startswith(str(self.root)):
+            raise ValueError("Access outside secure store is not allowed")
         p.parent.mkdir(parents=True, exist_ok=True)
 
         context = self._uri_to_context(uri)
@@ -134,10 +137,10 @@ class SecureStore:
 
     def decrypt_read(self, uri: str) -> bytes:
         assert uri.startswith("file://"), "URI must start with file://"
-        p = Path(uri[len("file://"):])
+        p = Path(uri[len("file://"):]).resolve()
 
-        if not p.exists():
-            raise FileNotFoundError(f"SecureStore: file not found: {p}")
+        if not str(p).startswith(str(self.root)):
+            raise ValueError("Access outside secure store is not allowed")
 
         raw = json.loads(p.read_text())
         nonce = base64.b64decode(raw["nonce"])

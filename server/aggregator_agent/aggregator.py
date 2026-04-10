@@ -46,7 +46,7 @@ class AggregatorAgent:
 
         # AES-GCM / KMS (SecureStore)
         if scheme.lower().startswith("aes") or scheme.lower().startswith("kms"):
-            from core.centralized_secure_store import SecureStore
+            from server.aggregator_agent.core.centralized_secure_store import SecureStore
 
             store = SecureStore(agent="aggregator", root="./secure_store")
             raw = store.decrypt_read("file://" + enc_path)
@@ -102,8 +102,11 @@ class AggregatorAgent:
             return np.mean(arr, axis=0)
 
         elif self.mode == "trimmed_mean":
-            lower = int(self.trim_ratio * len(arr))
+            lower = max(1, int(self.trim_ratio * len(arr)))
             upper = len(arr) - lower
+
+            if lower >= upper:
+                raise ValueError("Trim ratio too large for number of updates")
             sorted_arr = np.sort(arr, axis=0)
             return np.mean(sorted_arr[lower:upper], axis=0)
 
