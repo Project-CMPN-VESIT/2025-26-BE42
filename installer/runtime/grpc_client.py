@@ -45,7 +45,7 @@ _RETRY_BASE_S = 1.0   # exponential backoff base
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
-def _wait_ready(channel, timeout: float = 15.0):
+def _wait_ready(channel: grpc.Channel, timeout: float = 15.0):
     """Block until channel is ready or raise."""
     try:
         grpc.channel_ready_future(channel).result(timeout=timeout)
