@@ -1,30 +1,86 @@
 #!/usr/bin/env python3
 """
-federated_client.py — Main entry point for the federated learning client.
+federated_client.py — Main entry point.  FIXED VERSION.
 
-Phases integrated here:
-  Phase 3:  Dual-channel mTLS (create_grpc_stub)
-  Phase 5:  Continuous daemon (daemon_loop with capture)
-  Phase 7:  IntegrityWatcher background thread
-  Phase 9:  gRPC retry (via call_with_retry in pipeline)
-  Phase 11: Structured logging + metrics + health reporting
+Key fixes (every line reviewed):
+  FIX-1: VENV_PYTHON was hard-coded to Windows path
+          (venv/Scripts/python.exe).  Now platform-aware.
+  FIX-2: sys.path setup now also adds BASE/runtime explicitly so that
+          `from runtime.grpc_client import ...` works even when this
+          file is invoked directly (e.g. `python federated-client`).
+  FIX-3: Added BASE/core to sys.path so `from core.centralized_secure_store
+          import SecureStore` resolves in the pipeline import chain.
+  FIX-4: runtime/__init__.py is created on first run if missing, ensuring
+          relative imports inside runtime_guard.py (`from .tpm_guard import`)
+          resolve correctly when runtime is treated as a package.
+  FIX-5: installer/__init__.py created on first run if missing, so that
+          `from installer.security.integrity import integrity_guard` (used
+          by dp_agent, enc_agent, trainer, lda/main) doesn't raise
+          ModuleNotFoundError.
 """
 
 import sys
+import platform
 from pathlib import Path
 
-# ── Ensure .federated is on PYTHONPATH ───────────────────────────────────────
-BASE = Path(__file__).resolve().parent.parent   # ~/.federated
-VENV_PYTHON = BASE / "venv" / "Scripts" / "python.exe"
+IS_WINDOWS = platform.system().lower() == "windows"
 
+# ── Locate ~/.federated regardless of where this script sits ─────────────────
+# federated-client is installed at ~/.federated/bin/federated-client
+# so parent = ~/.federated/bin, parent.parent = ~/.federated
+BASE = Path(__file__).resolve().parent.parent   # ~/.federated
+
+# FIX-1: platform-aware venv python path
+if IS_WINDOWS:
+    VENV_PYTHON = BASE / "venv" / "Scripts" / "python.exe"
+else:
+    VENV_PYTHON = BASE / "venv" / "bin" / "python"
+
+# ── Redirect into venv if we're not already running inside it ─────────────────
 if Path(sys.executable).resolve() != VENV_PYTHON.resolve() and VENV_PYTHON.exists():
     import subprocess
-    subprocess.run([str(VENV_PYTHON), __file__, *sys.argv[1:]])
-    sys.exit(0)
+    result = subprocess.run([str(VENV_PYTHON), __file__, *sys.argv[1:]])
+    sys.exit(result.returncode)
 
-for extra in [str(BASE), str(BASE / "bin"), str(BASE / "installer")]:
-    if extra not in sys.path:
-        sys.path.insert(0, extra)
+# ── Build sys.path before any project imports ─────────────────────────────────
+# FIX-2/3: added BASE/runtime and BASE/core
+_PATH_EXTRAS = [
+    str(BASE),             # enables: runtime.*, agents.*, core.*
+    str(BASE / "runtime"), # enables: direct runtime module lookups
+    str(BASE / "core"),    # enables: core.centralized_secure_store etc.
+    str(BASE / "installer"), # enables: security.* (integrity_guard etc.)
+    str(BASE / "bin"),
+]
+for _extra in _PATH_EXTRAS:
+    if _extra not in sys.path:
+        sys.path.insert(0, _extra)
+
+# ── FIX-4: ensure runtime/__init__.py exists so relative imports work ─────────
+_runtime_init = BASE / "runtime" / "__init__.py"
+if not _runtime_init.exists() and (BASE / "runtime").exists():
+    try:
+        _runtime_init.write_text("")
+        _runtime_init.chmod(0o600)
+    except Exception:
+        pass
+
+# ── FIX-5: ensure installer/__init__.py exists ────────────────────────────────
+_installer_init = BASE / "installer" / "__init__.py"
+if not _installer_init.exists() and (BASE / "installer").exists():
+    try:
+        _installer_init.write_text("")
+        _installer_init.chmod(0o600)
+    except Exception:
+        pass
+
+# ── FIX-5b: ensure grpc sub-package __init__.py exists ───────────────────────
+_grpc_init = BASE / "runtime" / "grpc" / "__init__.py"
+if not _grpc_init.exists() and (BASE / "runtime" / "grpc").exists():
+    try:
+        _grpc_init.write_text("")
+        _grpc_init.chmod(0o600)
+    except Exception:
+        pass
 
 # ── Phase 11: logging FIRST ──────────────────────────────────────────────────
 from runtime.logging_config import setup_logging, MetricsCollector, HealthReporter

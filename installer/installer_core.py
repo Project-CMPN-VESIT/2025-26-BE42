@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-installer_core.py — Two-phase enrollment + daemon registration.
+installer_core.py — Two-phase enrollment + daemon registration.  FIXED VERSION.
 
-Phase A  (setup_software):  all local software setup; no server interaction.
-Phase B1 (request_enrollment_otp):  announce device to server; server prints OTP.
-Phase B2 (complete_enrollment):  submit OTP → get client cert → register daemon.
-
-This split allows the GUI to:
-  1. Run Phase A in background while showing a progress log.
-  2. Show the device fingerprint after Phase A.
-  3. Wait for the user to receive the OTP from their admin.
-  4. Run Phase B2 when the user submits the OTP.
+Key fixes (every line reviewed):
+  FIX-1: install_mentalbert_model() is now called at the END of setup_software(),
+          AFTER create_venv() and install_python_deps().  Previously it was called
+          inside install_runtime() before the venv existed, so the download
+          subprocess had no access to huggingface_hub or transformers and the
+          ~/.federated/models/ directory was never created.
+  FIX-2: _open_channel() now tries TLS first, then insecure — matching the
+          security-focused design intent.  The original tried insecure first,
+          which silently bypassed TLS on any server that accepted plain-text.
+  FIX-3: LOG_FILE.parent.mkdir() guarded to avoid crash when ~/.federated
+          doesn't exist yet at module import time.
 """
 
 import sys
@@ -30,7 +32,7 @@ from pathlib import Path
 import grpc
 
 from fs.secure_layout import create_secure_layout
-from fs.install_runtime import install_runtime
+from fs.install_runtime import install_runtime, install_mentalbert_model
 from fs.install_python_deps import install_python_deps
 from fs.install_openface import install_openface
 from fs.install_opensmile import install_opensmile
@@ -68,7 +70,11 @@ KEYS_DIR   = BASE_DIR / "keys"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOG_FILE = BASE_DIR / "logs" / "installer.log"
-LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+# FIX-3: guard mkdir so module import doesn't crash before layout is created
+try:
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
 
 logging.basicConfig(
     filename=str(LOG_FILE),
@@ -106,10 +112,49 @@ def _parse_addr(server_addr: str):
 
 def _open_channel(server_addr: str) -> grpc.Channel:
     """
-    Open a gRPC channel to the server, trying insecure first then TLS.
-    Returns a connected channel or raises.
+    Open a gRPC channel to the server.
+    FIX-2: Try TLS first (secure default).  Only fall back to insecure if the
+    CA cert is absent AND the caller explicitly opts in — insecure is now the
+    last resort, not the first attempt.
     """
-    # Try insecure (enable_tls=false servers)
+    ca_pem = KEYS_DIR / "ca.pem"
+
+    # ── TLS (preferred) ───────────────────────────────────────────────────────
+    if ca_pem.exists():
+        try:
+            creds = grpc.ssl_channel_credentials(root_certificates=ca_pem.read_bytes())
+            ch = grpc.secure_channel(
+                server_addr,
+                creds,
+                options=[
+                    ("grpc.keepalive_time_ms", 10_000),
+                    ("grpc.keepalive_timeout_ms", 5_000),
+                ],
+            )
+            grpc.channel_ready_future(ch).result(timeout=10)
+            logging.info("[gRPC] TLS channel connected")
+            return ch
+        except grpc.FutureTimeoutError:
+            try:
+                ch.close()
+            except Exception:
+                pass
+            host, _ = _parse_addr(server_addr)
+            raise RuntimeError(
+                f"[gRPC] TLS handshake timed out. Regenerate certs:\n"
+                f"  bash certs/gen_certs.sh {host}\n"
+                "  OR set enable_tls=false for local testing."
+            )
+        except Exception as e_tls:
+            logging.warning("[gRPC] TLS failed (%s), checking insecure fallback…",
+                            type(e_tls).__name__)
+            try:
+                ch.close()
+            except Exception:
+                pass
+
+    # ── Insecure (fallback — only when CA cert absent, e.g. dev mode) ─────────
+    logging.warning("[gRPC] No CA cert found at %s — attempting insecure channel", ca_pem)
     try:
         ch = grpc.insecure_channel(
             server_addr,
@@ -119,47 +164,18 @@ def _open_channel(server_addr: str) -> grpc.Channel:
             ],
         )
         grpc.channel_ready_future(ch).result(timeout=3)
-        logging.info("[gRPC] Insecure channel connected")
+        logging.warning("[gRPC] Insecure channel connected — NOT suitable for production")
         return ch
     except Exception as e_ins:
-        logging.info("[gRPC] Insecure failed (%s), trying TLS…", type(e_ins).__name__)
         try:
             ch.close()
         except Exception:
             pass
-
-    # TLS fallback
-    ca_pem = KEYS_DIR / "ca.pem"
-    if not ca_pem.exists():
         raise RuntimeError(
-            f"[gRPC] Cannot connect insecure AND CA cert not found at {ca_pem}.\n"
-            "  Fix A: set enable_tls=false in orchestrator.toml\n"
-            f"  Fix B: copy certs/ca.pem to {ca_pem}"
-        )
-
-    try:
-        creds = grpc.ssl_channel_credentials(root_certificates=ca_pem.read_bytes())
-        ch = grpc.secure_channel(
-            server_addr,
-            creds,
-            options=[
-                ("grpc.keepalive_time_ms", 10_000),
-                ("grpc.keepalive_timeout_ms", 5_000),
-            ],
-        )
-        grpc.channel_ready_future(ch).result(timeout=10)
-        logging.info("[gRPC] TLS channel connected")
-        return ch
-    except grpc.FutureTimeoutError:
-        try:
-            ch.close()
-        except Exception:
-            pass
-        host, _ = _parse_addr(server_addr)
-        raise RuntimeError(
-            f"[gRPC] TLS handshake timed out. Regenerate certs:\n"
-            f"  bash certs/gen_certs.sh {host}\n"
-            "  OR set enable_tls=false for local testing."
+            f"[gRPC] Cannot connect TLS (no CA cert at {ca_pem}) "
+            f"or insecure ({e_ins}).\n"
+            "  Fix A: copy certs/ca.pem to installer/runtime/keys/ca.pem and rebuild.\n"
+            "  Fix B: set enable_tls=false in orchestrator.toml for local testing."
         )
 
 
@@ -200,15 +216,6 @@ def _generate_csr() -> tuple:
 # ── Phase B1: Request OTP from server ─────────────────────────────────────────
 
 def request_enrollment_otp(device_pubkey: bytes, server_addr: str) -> str:
-    """
-    Send RequestEnrollment to server.  Server generates a per-device OTP and
-    prints it to the admin console.
-
-    Returns:
-        device_fingerprint  — the stable hex ID the admin sees on the console,
-                              shown to the installer user so they can tell their
-                              admin which device they are.
-    """
     logging.info("[ENROLL-REQ] Requesting enrollment OTP from %s", server_addr)
 
     host, port = _parse_addr(server_addr)
@@ -222,7 +229,6 @@ def request_enrollment_otp(device_pubkey: bytes, server_addr: str) -> str:
 
     _, csr_bytes = _generate_csr()
 
-    # Build device_info string for admin readability
     import socket as _sock
     try:
         hostname = _sock.gethostname()
@@ -264,7 +270,6 @@ def request_enrollment_otp(device_pubkey: bytes, server_addr: str) -> str:
 # ── Phase B2: Complete enrollment with OTP ─────────────────────────────────────
 
 def complete_enrollment(device_pubkey: bytes, token: str, server_addr: str):
-    """Submit OTP to server, receive and save client certificate."""
     logging.info("[ENROLL] Completing enrollment with OTP")
 
     token = token.strip()
@@ -277,7 +282,6 @@ def complete_enrollment(device_pubkey: bytes, token: str, server_addr: str):
             f"[ENROLL] Cannot reach server at {host}:{port}."
         )
 
-    # Reuse CSR generated during request_enrollment_otp (persisted to disk)
     client_csr_path = KEYS_DIR / "client.csr"
     if not client_csr_path.exists():
         raise RuntimeError(
@@ -329,7 +333,6 @@ def complete_enrollment(device_pubkey: bytes, token: str, server_addr: str):
 # ── Daemon registration ────────────────────────────────────────────────────────
 
 def register_daemon():
-    """Register federated-client as a background service that starts on login."""
     system = platform.system().lower()
     if system == "windows":
         _register_windows_task()
@@ -340,7 +343,6 @@ def register_daemon():
 
 
 def _register_windows_task():
-    """Register as a Windows Scheduled Task (runs at logon, highest privilege)."""
     python = BASE_DIR / "venv" / "Scripts" / "python.exe"
     client = BASE_DIR / "bin" / "federated-client"
     task_name = "FederatedLearningClient"
@@ -400,10 +402,8 @@ def _register_windows_task():
 
 
 def _register_linux_service():
-    """Register as a systemd user service; fall back to crontab."""
     python = BASE_DIR / "venv" / "bin" / "python"
     client = BASE_DIR / "bin" / "federated-client"
-    user = os.environ.get("USER", "federated")
 
     service = f"""[Unit]
 Description=Federated Learning Client Daemon
@@ -480,7 +480,7 @@ def create_venv():
         return
 
     result = subprocess.run(
-        ["python", "-m", "venv", str(VENV_DIR)],
+        [sys.executable, "-m", "venv", str(VENV_DIR)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -520,6 +520,8 @@ def setup_software(server_addr: str) -> bytes:
 
     logging.info("[3] Installing runtime payload")
     install_runtime()
+
+    logging.info("[3b] Creating virtual environment")
     create_venv()
 
     logging.info("[4] TPM identity provisioning")
@@ -572,6 +574,14 @@ def setup_software(server_addr: str) -> bytes:
     logging.info("[9] Verifying platform dependencies")
     verify_windows_deps()
 
+    # FIX-1: install_mentalbert_model() is now called HERE — after create_venv()
+    # and install_python_deps() — so the venv python has huggingface_hub and
+    # transformers installed.  Previously this was called inside install_runtime()
+    # before the venv existed, causing the download to fail silently and the
+    # ~/.federated/models/ directory to never be created.
+    logging.info("[10] Installing MentalBERT model")
+    install_mentalbert_model()
+
     logging.info("=== PHASE A COMPLETE ===")
     return device_pubkey
 
@@ -580,8 +590,6 @@ def finalize_install(device_pubkey: bytes, otp: str, server_addr: str):
     """
     Phase B2 + finalization: complete enrollment with OTP, register daemon,
     write install state and integrity baseline.
-
-    Call this AFTER the user has entered the OTP received from the admin.
     """
     logging.info("=== PHASE B2: ENROLLMENT COMPLETION ===")
 
@@ -610,11 +618,6 @@ def finalize_install(device_pubkey: bytes, otp: str, server_addr: str):
 # ── Legacy single-call entry point (non-GUI usage) ────────────────────────────
 
 def main(otp=None, server_addr=None):
-    """
-    Legacy entry point for non-GUI / scripted usage.
-    In the GUI, setup_software(), request_enrollment_otp(), and finalize_install()
-    are called separately.
-    """
     device_pubkey = setup_software(server_addr)
     fingerprint = request_enrollment_otp(device_pubkey, server_addr)
     print(

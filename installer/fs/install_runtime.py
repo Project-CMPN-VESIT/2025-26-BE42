@@ -1,3 +1,19 @@
+"""
+install_runtime.py  — FIXED VERSION
+
+Key fixes applied (every line reviewed):
+  FIX-1: install_mentalbert_model() removed from install_runtime().
+          It is now called by installer_core.setup_software() AFTER
+          create_venv() and install_python_deps() so that
+          huggingface_hub / transformers are available in the venv.
+  FIX-2: Step 10 now also writes ~/.federated/installer/__init__.py
+          so that `from installer.security.integrity import ...` works
+          at runtime (federated_client.py import chain).
+  FIX-3: Also writes ~/.federated/runtime/__init__.py so that relative
+          imports inside runtime_guard.py (`from .tpm_guard import ...`)
+          resolve correctly when runtime is imported as a package.
+"""
+
 import shutil
 import stat
 import platform
@@ -60,17 +76,24 @@ def _is_real_model(directory: Path) -> bool:
     )
     if not model_files:
         return False
-    # Real model files are megabytes; LFS pointers are ~100-200 bytes
     return max(f.stat().st_size for f in model_files) > 1_000_000
 
 
 def install_mentalbert_model():
+    """
+    FIX-1: This function is NO LONGER called from install_runtime().
+    It must be called by installer_core.setup_software() AFTER
+    create_venv() and install_python_deps() complete, so that
+    huggingface_hub and transformers are present in the venv.
+    """
     MODEL_DST = BASE_DIR / "models" / "mentalbert"
     MODEL_SRC = RUNTIME_SRC / "models" / "mentalbert"
+    MODEL_DST.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[MODEL] Checking MentalBERT at {MODEL_DST}", flush=True)
+    print("[DEBUG] MODEL_SRC:", MODEL_SRC)
+    print("[DEBUG] MODEL_SRC exists:", MODEL_SRC.exists())
 
-    # ── Check existing install ────────────────────────────────────────────────
     if MODEL_DST.exists():
         if _is_real_model(MODEL_DST):
             print("[MODEL] Already installed and valid, skipping")
@@ -83,7 +106,6 @@ def install_mentalbert_model():
             )
             shutil.rmtree(MODEL_DST)
 
-    # ── Try installer payload ─────────────────────────────────────────────────
     if MODEL_SRC.exists() and _is_real_model(MODEL_SRC):
         print("[MODEL] Installing from installer payload…")
         shutil.copytree(MODEL_SRC, MODEL_DST)
@@ -97,7 +119,7 @@ def install_mentalbert_model():
             flush=True,
         )
 
-    # ── Download via venv python ──────────────────────────────────────────────
+    # ── venv python is now guaranteed to exist (called after create_venv+deps) ─
     python_cmd = str(_venv_python()) if _venv_python().exists() else sys.executable
 
     download_script = r'''
@@ -105,6 +127,7 @@ import sys, os
 from pathlib import Path
 
 dst = sys.argv[1]
+Path(dst).mkdir(parents=True, exist_ok=True)
 
 def try_hub_download(repo_id, dst):
     try:
@@ -119,13 +142,11 @@ def try_hub_download(repo_id, dst):
         print(f"[WARN] Hub download failed for {repo_id}: {e}", flush=True)
         return False
 
-# Primary: mental/mental-bert-base-uncased
 if try_hub_download("mental/mental-bert-base-uncased", dst):
     print("[OK] MentalBERT downloaded from HuggingFace Hub", flush=True)
     sys.exit(0)
 
-# Fallback: standard BERT (compatible architecture)
-print("[MODEL] Falling back to bert-base-uncased (compatible with MentalBERT architecture)", flush=True)
+print("[MODEL] Falling back to bert-base-uncased (compatible architecture)", flush=True)
 try:
     from transformers import AutoModel, AutoTokenizer
     Path(dst).mkdir(parents=True, exist_ok=True)
@@ -153,6 +174,12 @@ except Exception as e2:
     if result.returncode != 0:
         print(result.stderr or "", end="", file=sys.stderr)
         raise RuntimeError("MentalBERT model installation failed — check network or HuggingFace token.")
+
+    if not MODEL_DST.exists():
+        raise RuntimeError("Model folder was not created at all")
+
+    if not _is_real_model(MODEL_DST):
+        raise RuntimeError("Model exists but is invalid (likely LFS pointer or failed download)")
 
     print("[OK] MentalBERT model ready", flush=True)
 
@@ -230,6 +257,21 @@ def install_runtime():
     shutil.copytree(RUNTIME_SRC / "agents", agents_dst)
     _chmod_tree(agents_dst)
 
+    # FIX-2a: ensure agents package __init__.py files exist so imports work
+    for pkg_dir in [agents_dst,
+                    agents_dst / "lda",
+                    agents_dst / "lda" / "pipelines",
+                    agents_dst / "trainer",
+                    agents_dst / "dp",
+                    agents_dst / "enc"]:
+        init_file = pkg_dir / "__init__.py"
+        if not init_file.exists():
+            init_file.write_text("")
+            try:
+                init_file.chmod(0o600)
+            except Exception:
+                pass
+
     # 3. configs
     configs_dst = BASE_DIR / "configs"
     if configs_dst.exists():
@@ -249,12 +291,32 @@ def install_runtime():
         shutil.copy2(f, runtime_dst / f.name)
     _chmod_tree(runtime_dst)
 
+    # FIX-3: create runtime/__init__.py so relative imports inside
+    # runtime_guard.py (`from .tpm_guard import ...`) resolve correctly
+    # when `runtime` is imported as a package from federated_client.py.
+    runtime_init = runtime_dst / "__init__.py"
+    if not runtime_init.exists():
+        runtime_init.write_text("")
+        try:
+            runtime_init.chmod(0o600)
+        except Exception:
+            pass
+
     # 5. grpc stubs
     grpc_dst = BASE_DIR / "runtime" / "grpc"
     if grpc_dst.exists():
         shutil.rmtree(grpc_dst)
     shutil.copytree(RUNTIME_SRC / "grpc", grpc_dst)
     _chmod_tree(grpc_dst)
+
+    # FIX-2b: grpc sub-package __init__.py
+    grpc_init = grpc_dst / "__init__.py"
+    if not grpc_init.exists():
+        grpc_init.write_text("")
+        try:
+            grpc_init.chmod(0o600)
+        except Exception:
+            pass
 
     # 6. core shared modules
     core_src = RUNTIME_SRC / "core"
@@ -264,6 +326,15 @@ def install_runtime():
             shutil.rmtree(core_dst)
         shutil.copytree(core_src, core_dst)
         _chmod_tree(core_dst)
+
+    # FIX-2c: core package __init__.py
+    core_init = core_dst / "__init__.py"
+    if not core_init.exists():
+        core_init.write_text("")
+        try:
+            core_init.chmod(0o600)
+        except Exception:
+            pass
 
     # 7. Windows native deps (OpenFace + openSMILE)
     install_windows_deps()
@@ -306,7 +377,36 @@ def install_runtime():
     else:
         print("[WARN] installer/security not found in installer package")
 
-    # 11. MentalBERT (LFS-aware download)
-    install_mentalbert_model()
+    # FIX-2d: CRITICAL — create ~/.federated/installer/__init__.py so that
+    # `from installer.security.integrity import integrity_guard` resolves.
+    # Without this, every agent (dp_agent, enc_agent, trainer, lda/main)
+    # that calls `from installer.security.integrity import integrity_guard`
+    # raises ModuleNotFoundError at runtime.
+    installer_pkg = BASE_DIR / "installer"
+    installer_pkg.mkdir(parents=True, exist_ok=True)
+    installer_init = installer_pkg / "__init__.py"
+    if not installer_init.exists():
+        installer_init.write_text("")
+        try:
+            installer_init.chmod(0o600)
+        except Exception:
+            pass
+
+    # FIX-2e: also ensure installer/security/__init__.py is present
+    # (it should be copied above, but guarantee it exists)
+    sec_init = installer_security_dst / "__init__.py"
+    if not sec_init.exists():
+        sec_init.write_text(
+            "from .anti_debug import anti_debug\n"
+            "from .tpm_attestation import tpm_attestation\n"
+        )
+        try:
+            sec_init.chmod(0o600)
+        except Exception:
+            pass
+
+    # NOTE: install_mentalbert_model() is intentionally NOT called here.
+    # It is called by installer_core.setup_software() AFTER install_python_deps()
+    # so the venv python has huggingface_hub and transformers available.
 
     print("[OK] Runtime installed successfully")
