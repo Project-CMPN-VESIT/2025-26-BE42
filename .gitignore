@@ -51,4 +51,10 @@ LDA/OpenFace/
 LDA/opensmile/
 .environments
 plots/
-LDA/app/pipelines/.env
+LDA/app/pipelines/.env*.env
+.env
+*.key
+server.key
+ca.key
+certs/ca.key
+certs/server.key

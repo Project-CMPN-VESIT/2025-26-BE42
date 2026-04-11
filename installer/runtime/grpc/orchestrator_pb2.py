@@ -14,33 +14,41 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12orchestrator.proto\x12\x0corchestrator\"\x1c\n\x03\x43SR\x12\x15\n\rdevice_pubkey\x18\x01 \x01(\x0c\"\x1a\n\x0b\x43\x65rtificate\x12\x0b\n\x03pem\x18\x01 \x01(\x0c\"\x16\n\x08\x44\x65viceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\x9f\x01\n\rRoundMetadata\x12\x10\n\x08round_id\x18\x01 \x01(\x04\x12\x15\n\rmodel_version\x18\x02 \x01(\t\x12\x13\n\x0b\x65psilon_max\x18\x03 \x01(\x01\x12\x12\n\nupload_uri\x18\x04 \x01(\t\x12\r\n\x05state\x18\x05 \x01(\t\x12\x13\n\x0bnum_updates\x18\x06 \x01(\r\x12\x18\n\x10\x61ggregation_mode\x18\x07 \x01(\t\"\x9e\x01\n\x07Receipt\x12\x11\n\tdevice_id\x18\x01 \x01(\x0c\x12\x10\n\x08round_id\x18\x02 \x01(\x04\x12\x14\n\x0cpayload_hash\x18\x03 \x01(\x0c\x12\x15\n\repsilon_spent\x18\x04 \x01(\x01\x12\x11\n\tsignature\x18\x05 \x01(\x0c\x12\x0f\n\x07\x65nc_uri\x18\x06 \x01(\t\x12\x0e\n\x06scheme\x18\x07 \x01(\t\x12\r\n\x05nonce\x18\x08 \x01(\t\"\x11\n\x03\x41\x63k\x12\n\n\x02ok\x18\x01 \x01(\x08\"L\n\x11\x45nrollmentRequest\x12\x15\n\rdevice_pubkey\x18\x01 \x01(\x0c\x12\x0b\n\x03\x63sr\x18\x02 \x01(\x0c\x12\x13\n\x0b\x64\x65vice_info\x18\x03 \x01(\t\"D\n\x14\x45nrollmentRequestAck\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x12\x1a\n\x12\x64\x65vice_fingerprint\x18\x02 \x01(\t\"M\n\rEnrollRequest\x12\x18\n\x10\x65nrollment_token\x18\x01 \x01(\t\x12\x15\n\rdevice_pubkey\x18\x02 \x01(\x0c\x12\x0b\n\x03\x63sr\x18\x03 \x01(\x0c\"1\n\x0e\x45nrollResponse\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x13\n\x0b\x63lient_cert\x18\x02 \x01(\x0c\x32\xef\x02\n\x0cOrchestrator\x12>\n\x0eRegisterDevice\x12\x11.orchestrator.CSR\x1a\x19.orchestrator.Certificate\x12?\n\x08GetRound\x12\x16.orchestrator.DeviceId\x1a\x1b.orchestrator.RoundMetadata\x12\x39\n\rSubmitReceipt\x12\x15.orchestrator.Receipt\x1a\x11.orchestrator.Ack\x12X\n\x11RequestEnrollment\x12\x1f.orchestrator.EnrollmentRequest\x1a\".orchestrator.EnrollmentRequestAck\x12I\n\x0c\x45nrollDevice\x12\x1b.orchestrator.EnrollRequest\x1a\x1c.orchestrator.EnrollResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12orchestrator.proto\x12\x0corchestrator\"\x93\x01\n\x0bUpdateChunk\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x10\n\x08round_id\x18\x02 \x01(\x04\x12\x11\n\tdevice_id\x18\x03 \x01(\x0c\x12\x13\n\x0b\x63hunk_index\x18\x04 \x01(\x04\x12\x14\n\x0ctotal_chunks\x18\x05 \x01(\x04\x12\x0c\n\x04\x64\x61ta\x18\x06 \x01(\x0c\x12\x12\n\nchunk_hash\x18\x07 \x01(\x0c\"=\n\tUploadAck\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x15\n\rserver_handle\x18\x02 \x01(\t\x12\r\n\x05\x65rror\x18\x03 \x01(\t\"3\n\x0cRoundRequest\x12\x11\n\tdevice_id\x18\x01 \x01(\x0c\x12\x10\n\x08round_id\x18\x02 \x01(\x04\"m\n\nModelChunk\x12\x13\n\x0b\x63hunk_index\x18\x01 \x01(\x04\x12\x14\n\x0ctotal_chunks\x18\x02 \x01(\x04\x12\x0c\n\x04\x64\x61ta\x18\x03 \x01(\x0c\x12\x12\n\nchunk_hash\x18\x04 \x01(\x0c\x12\x12\n\nmodel_hash\x18\x05 \x01(\x0c\"\x1c\n\x03\x43SR\x12\x15\n\rdevice_pubkey\x18\x01 \x01(\x0c\"\x1a\n\x0b\x43\x65rtificate\x12\x0b\n\x03pem\x18\x01 \x01(\x0c\"\x16\n\x08\x44\x65viceId\x12\n\n\x02id\x18\x01 \x01(\x0c\"\xbf\x01\n\rRoundMetadata\x12\x10\n\x08round_id\x18\x01 \x01(\x04\x12\x15\n\rmodel_version\x18\x02 \x01(\t\x12\x13\n\x0b\x65psilon_max\x18\x03 \x01(\x01\x12\x12\n\nupload_uri\x18\x04 \x01(\t\x12\r\n\x05state\x18\x05 \x01(\t\x12\x13\n\x0bnum_updates\x18\x06 \x01(\r\x12\x18\n\x10\x61ggregation_mode\x18\x07 \x01(\t\x12\x1e\n\x16global_model_available\x18\x08 \x01(\x08\"\xa1\x01\n\x07Receipt\x12\x11\n\tdevice_id\x18\x01 \x01(\x0c\x12\x10\n\x08round_id\x18\x02 \x01(\x04\x12\x14\n\x0cpayload_hash\x18\x03 \x01(\x0c\x12\x15\n\repsilon_spent\x18\x04 \x01(\x01\x12\x11\n\tsignature\x18\x05 \x01(\x0c\x12\x12\n\nenc_handle\x18\x06 \x01(\t\x12\x0e\n\x06scheme\x18\x07 \x01(\t\x12\r\n\x05nonce\x18\x08 \x01(\t\"\x11\n\x03\x41\x63k\x12\n\n\x02ok\x18\x01 \x01(\x08\"L\n\x11\x45nrollmentRequest\x12\x15\n\rdevice_pubkey\x18\x01 \x01(\x0c\x12\x0b\n\x03\x63sr\x18\x02 \x01(\x0c\x12\x13\n\x0b\x64\x65vice_info\x18\x03 \x01(\t\"D\n\x14\x45nrollmentRequestAck\x12\x10\n\x08\x61\x63\x63\x65pted\x18\x01 \x01(\x08\x12\x1a\n\x12\x64\x65vice_fingerprint\x18\x02 \x01(\t\"M\n\rEnrollRequest\x12\x18\n\x10\x65nrollment_token\x18\x01 \x01(\t\x12\x15\n\rdevice_pubkey\x18\x02 \x01(\x0c\x12\x0b\n\x03\x63sr\x18\x03 \x01(\x0c\"1\n\x0e\x45nrollResponse\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x13\n\x0b\x63lient_cert\x18\x02 \x01(\x0c\x32\x84\x04\n\x0cOrchestrator\x12>\n\x0eRegisterDevice\x12\x11.orchestrator.CSR\x1a\x19.orchestrator.Certificate\x12X\n\x11RequestEnrollment\x12\x1f.orchestrator.EnrollmentRequest\x1a\".orchestrator.EnrollmentRequestAck\x12I\n\x0c\x45nrollDevice\x12\x1b.orchestrator.EnrollRequest\x1a\x1c.orchestrator.EnrollResponse\x12?\n\x08GetRound\x12\x16.orchestrator.DeviceId\x1a\x1b.orchestrator.RoundMetadata\x12\x44\n\x0cUploadUpdate\x12\x19.orchestrator.UpdateChunk\x1a\x17.orchestrator.UploadAck(\x01\x12\x39\n\rSubmitReceipt\x12\x15.orchestrator.Receipt\x1a\x11.orchestrator.Ack\x12M\n\x13\x44ownloadGlobalModel\x12\x1a.orchestrator.RoundRequest\x1a\x18.orchestrator.ModelChunk0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'orchestrator_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
-  _globals['_CSR']._serialized_start=36
-  _globals['_CSR']._serialized_end=64
-  _globals['_CERTIFICATE']._serialized_start=66
-  _globals['_CERTIFICATE']._serialized_end=92
-  _globals['_DEVICEID']._serialized_start=94
-  _globals['_DEVICEID']._serialized_end=116
-  _globals['_ROUNDMETADATA']._serialized_start=119
-  _globals['_ROUNDMETADATA']._serialized_end=278
-  _globals['_RECEIPT']._serialized_start=281
-  _globals['_RECEIPT']._serialized_end=439
-  _globals['_ACK']._serialized_start=441
-  _globals['_ACK']._serialized_end=458
-  _globals['_ENROLLMENTREQUEST']._serialized_start=460
-  _globals['_ENROLLMENTREQUEST']._serialized_end=536
-  _globals['_ENROLLMENTREQUESTACK']._serialized_start=538
-  _globals['_ENROLLMENTREQUESTACK']._serialized_end=606
-  _globals['_ENROLLREQUEST']._serialized_start=608
-  _globals['_ENROLLREQUEST']._serialized_end=685
-  _globals['_ENROLLRESPONSE']._serialized_start=687
-  _globals['_ENROLLRESPONSE']._serialized_end=736
-  _globals['_ORCHESTRATOR']._serialized_start=739
-  _globals['_ORCHESTRATOR']._serialized_end=1106
+  _globals['_UPDATECHUNK']._serialized_start=37
+  _globals['_UPDATECHUNK']._serialized_end=184
+  _globals['_UPLOADACK']._serialized_start=186
+  _globals['_UPLOADACK']._serialized_end=247
+  _globals['_ROUNDREQUEST']._serialized_start=249
+  _globals['_ROUNDREQUEST']._serialized_end=300
+  _globals['_MODELCHUNK']._serialized_start=302
+  _globals['_MODELCHUNK']._serialized_end=411
+  _globals['_CSR']._serialized_start=413
+  _globals['_CSR']._serialized_end=441
+  _globals['_CERTIFICATE']._serialized_start=443
+  _globals['_CERTIFICATE']._serialized_end=469
+  _globals['_DEVICEID']._serialized_start=471
+  _globals['_DEVICEID']._serialized_end=493
+  _globals['_ROUNDMETADATA']._serialized_start=496
+  _globals['_ROUNDMETADATA']._serialized_end=687
+  _globals['_RECEIPT']._serialized_start=690
+  _globals['_RECEIPT']._serialized_end=851
+  _globals['_ACK']._serialized_start=853
+  _globals['_ACK']._serialized_end=870
+  _globals['_ENROLLMENTREQUEST']._serialized_start=872
+  _globals['_ENROLLMENTREQUEST']._serialized_end=948
+  _globals['_ENROLLMENTREQUESTACK']._serialized_start=950
+  _globals['_ENROLLMENTREQUESTACK']._serialized_end=1018
+  _globals['_ENROLLREQUEST']._serialized_start=1020
+  _globals['_ENROLLREQUEST']._serialized_end=1097
+  _globals['_ENROLLRESPONSE']._serialized_start=1099
+  _globals['_ENROLLRESPONSE']._serialized_end=1148
+  _globals['_ORCHESTRATOR']._serialized_start=1151
+  _globals['_ORCHESTRATOR']._serialized_end=1667
 # @@protoc_insertion_point(module_scope)

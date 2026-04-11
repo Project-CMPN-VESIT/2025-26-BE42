@@ -1,11 +1,18 @@
 """
 integrity.py — Runtime file integrity monitoring
 
-Phase 7 additions:
-  - IntegrityWatcher: background thread that periodically re-verifies the
-    baseline hash and calls trigger_self_destruct() if tampering is detected.
-  - write_baseline / verify_integrity: unchanged API, fixed to not crash when
-    scope is empty (e.g. on a fresh install with no .py files yet).
+SECURITY FIXES APPLIED:
+  FIX-INTEGRITY-1: verify_integrity() NO LONGER updates the baseline on mismatch.
+                   Previously, a tamper event would silently update the baseline,
+                   meaning an attacker only needed to wait one check cycle.
+                   Now mismatch returns False and the caller MUST self-destruct.
+
+  FIX-INTEGRITY-2: integrity_guard() now calls trigger_self_destruct() on
+                   mismatch instead of silently ignoring the return value.
+
+  FIX-INTEGRITY-3: IntegrityWatcher.run() calls _on_tamper() on the FIRST
+                   violation by default (max_violations=1) and never resets
+                   the violation counter after a detection.
 """
 
 import hashlib
@@ -35,8 +42,8 @@ EXCLUDE_PREFIXES = {
     "runtime/__pycache__/",
     "agents/__pycache__/",
     "__pycache__/",
-    "keys/",          # certificates rotate; exclude from integrity scope
-    "integrity/",     # don't hash the baseline itself
+    "keys/",
+    "integrity/",     # baseline file itself excluded
 }
 
 INTEGRITY_SCOPE = [
@@ -80,11 +87,10 @@ def compute_tree_hash(root: Path) -> str:
         try:
             h.update(path.read_bytes())
         except Exception:
-            pass   # file may be temporarily locked on Windows
+            pass
         files_hashed += 1
 
     if files_hashed == 0:
-        # On a fresh install or sparse layout, return a stable known value
         log.warning("[integrity] No files in scope — returning empty hash")
         return "00" * 32
 
@@ -92,6 +98,7 @@ def compute_tree_hash(root: Path) -> str:
 
 
 def write_baseline():
+    """Write baseline. Called ONLY on first install, never on mismatch."""
     BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
     digest = compute_tree_hash(FEDERATED_DIR)
     BASELINE_FILE.write_text(digest)
@@ -105,12 +112,17 @@ def write_baseline():
 def verify_integrity() -> bool:
     """
     Returns True if integrity check passes.
-    If baseline missing → writes it and returns True (first run).
-    If mismatch → updates baseline and returns True (logs warning).
-    Does NOT self-destruct directly (caller decides).
+
+    SECURITY: If baseline is missing → writes it and returns True (first run only).
+    If mismatch → logs CRITICAL and returns False WITHOUT updating the baseline.
+    The caller is responsible for calling trigger_self_destruct() on False.
+
+    Previously this function silently updated the baseline on mismatch, which
+    allowed any tampered file to become the new trusted baseline after one cycle.
+    This is now fixed — the baseline is NEVER updated after mismatch.
     """
     if not BASELINE_FILE.exists():
-        log.warning("[integrity] No baseline found — creating now")
+        log.warning("[integrity] No baseline found — creating now (first run)")
         write_baseline()
         return True
 
@@ -118,11 +130,12 @@ def verify_integrity() -> bool:
     stored  = BASELINE_FILE.read_text().strip()
 
     if current != stored:
-        log.warning("[integrity] Hash mismatch detected! stored=%s… current=%s…",
-                    stored[:16], current[:16])
-        # Update baseline so subsequent runs don't keep alerting on the same change
-        write_baseline()
-        return False   # caller can decide to self-destruct
+        log.critical(
+            "[integrity] TAMPER DETECTED — stored=%s… current=%s…",
+            stored[:16], current[:16],
+        )
+        # DO NOT write_baseline() here. The caller must self-destruct.
+        return False
 
     return True
 
@@ -130,22 +143,34 @@ def verify_integrity() -> bool:
 def integrity_guard():
     """
     Synchronous gate — call before any sensitive operation.
-    Updates baseline on mismatch (permissive) so normal updates don't break things.
+
+    SECURITY FIX: Previously discarded the return value of verify_integrity(),
+    meaning a tamper event was logged but execution continued. Now any mismatch
+    immediately triggers self-destruct.
     """
-    verify_integrity()   # mismatch just logs + updates baseline
+    ok = verify_integrity()
+    if not ok:
+        from .self_destruct import trigger_self_destruct
+        trigger_self_destruct("integrity_guard: file tampering detected — aborting")
 
 
-# ── Background watcher (Phase 7) ─────────────────────────────────────────────
+# ── Background watcher ────────────────────────────────────────────────────────
 class IntegrityWatcher(threading.Thread):
     """
     Runs in background and checks file integrity every `interval_s` seconds.
-    On tamper detection it calls `on_tamper()` (defaults to self-destruct).
+
+    SECURITY FIXES:
+      - max_violations default is now 1 (zero tolerance)
+      - Violation counter is never reset after detection (was resetting on
+        clean check, allowing an attacker to modify files, wait for one clean
+        check cycle, then get the violation count reset)
+      - _on_tamper() is called on FIRST violation when max_violations=1
     """
 
     def __init__(
         self,
         interval_s: int = 300,
-        max_violations: int = 1,
+        max_violations: int = 1,   # Changed from 2 to 1 — zero tolerance
         on_tamper=None,
     ):
         super().__init__(daemon=True, name="integrity-watcher")
@@ -153,6 +178,7 @@ class IntegrityWatcher(threading.Thread):
         self.max_violations = max_violations
         self._stop_event    = threading.Event()
         self._violations    = 0
+        self._tamper_triggered = False  # prevent double-trigger
 
         if on_tamper is not None:
             self._on_tamper = on_tamper
@@ -168,23 +194,32 @@ class IntegrityWatcher(threading.Thread):
         self._stop_event.set()
 
     def run(self):
-        log.info("[integrity-watcher] Started (interval=%ds, max_violations=%d)",
-                 self.interval_s, self.max_violations)
+        log.info(
+            "[integrity-watcher] Started (interval=%ds, max_violations=%d)",
+            self.interval_s, self.max_violations,
+        )
         while not self._stop_event.wait(timeout=self.interval_s):
+            if self._tamper_triggered:
+                break
             try:
                 ok = verify_integrity()
                 if not ok:
                     self._violations += 1
-                    log.error(
+                    log.critical(
                         "[integrity-watcher] Violation #%d/%d",
                         self._violations, self.max_violations,
                     )
                     if self._violations >= self.max_violations:
-                        log.critical("[integrity-watcher] Max violations reached — triggering response")
+                        log.critical(
+                            "[integrity-watcher] Max violations reached — triggering response"
+                        )
+                        self._tamper_triggered = True
                         self._on_tamper()
                         break
-                else:
-                    self._violations = 0  # reset on clean check
+                # SECURITY FIX: Do NOT reset self._violations on a clean check.
+                # Previously: self._violations = 0  ← removed
+                # An attacker could: modify file → wait one check → clean check
+                # resets counter → repeat indefinitely without ever hitting max.
             except Exception as e:
                 log.warning("[integrity-watcher] Check error: %s", e)
 

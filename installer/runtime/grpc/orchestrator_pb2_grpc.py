@@ -2,11 +2,21 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from . import orchestrator_pb2 as orchestrator__pb2
+import orchestrator_pb2 as orchestrator__pb2
 
 
 class OrchestratorStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """SECURITY FIXES:
+    - UploadUpdate: client now streams encrypted model bytes to server.
+    Previously enc_uri was a local file path the server could never read.
+    - DownloadGlobalModel: server streams global model back to client.
+    - UpdateChunk includes per-chunk SHA-256 so server verifies integrity
+    of each chunk as it arrives (detects corruption/tampering in transit).
+    - Receipt.enc_handle replaces enc_uri — it is the server-side GridFS
+    ObjectId returned by UploadAck, NOT a local file path.
+    - epsilon_spent must now come from the real RDP accountant.
+
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -19,16 +29,6 @@ class OrchestratorStub(object):
                 request_serializer=orchestrator__pb2.CSR.SerializeToString,
                 response_deserializer=orchestrator__pb2.Certificate.FromString,
                 )
-        self.GetRound = channel.unary_unary(
-                '/orchestrator.Orchestrator/GetRound',
-                request_serializer=orchestrator__pb2.DeviceId.SerializeToString,
-                response_deserializer=orchestrator__pb2.RoundMetadata.FromString,
-                )
-        self.SubmitReceipt = channel.unary_unary(
-                '/orchestrator.Orchestrator/SubmitReceipt',
-                request_serializer=orchestrator__pb2.Receipt.SerializeToString,
-                response_deserializer=orchestrator__pb2.Ack.FromString,
-                )
         self.RequestEnrollment = channel.unary_unary(
                 '/orchestrator.Orchestrator/RequestEnrollment',
                 request_serializer=orchestrator__pb2.EnrollmentRequest.SerializeToString,
@@ -39,12 +39,54 @@ class OrchestratorStub(object):
                 request_serializer=orchestrator__pb2.EnrollRequest.SerializeToString,
                 response_deserializer=orchestrator__pb2.EnrollResponse.FromString,
                 )
+        self.GetRound = channel.unary_unary(
+                '/orchestrator.Orchestrator/GetRound',
+                request_serializer=orchestrator__pb2.DeviceId.SerializeToString,
+                response_deserializer=orchestrator__pb2.RoundMetadata.FromString,
+                )
+        self.UploadUpdate = channel.stream_unary(
+                '/orchestrator.Orchestrator/UploadUpdate',
+                request_serializer=orchestrator__pb2.UpdateChunk.SerializeToString,
+                response_deserializer=orchestrator__pb2.UploadAck.FromString,
+                )
+        self.SubmitReceipt = channel.unary_unary(
+                '/orchestrator.Orchestrator/SubmitReceipt',
+                request_serializer=orchestrator__pb2.Receipt.SerializeToString,
+                response_deserializer=orchestrator__pb2.Ack.FromString,
+                )
+        self.DownloadGlobalModel = channel.unary_stream(
+                '/orchestrator.Orchestrator/DownloadGlobalModel',
+                request_serializer=orchestrator__pb2.RoundRequest.SerializeToString,
+                response_deserializer=orchestrator__pb2.ModelChunk.FromString,
+                )
 
 
 class OrchestratorServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """SECURITY FIXES:
+    - UploadUpdate: client now streams encrypted model bytes to server.
+    Previously enc_uri was a local file path the server could never read.
+    - DownloadGlobalModel: server streams global model back to client.
+    - UpdateChunk includes per-chunk SHA-256 so server verifies integrity
+    of each chunk as it arrives (detects corruption/tampering in transit).
+    - Receipt.enc_handle replaces enc_uri — it is the server-side GridFS
+    ObjectId returned by UploadAck, NOT a local file path.
+    - epsilon_spent must now come from the real RDP accountant.
+
+    """
 
     def RegisterDevice(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RequestEnrollment(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def EnrollDevice(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -56,24 +98,22 @@ class OrchestratorServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def SubmitReceipt(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def RequestEnrollment(self, request, context):
-        """Phase 1 of enrollment: client announces itself; server generates a
-        per-device OTP and prints it to the admin console.  No OTP is needed
-        to call this RPC — only device_pubkey and csr.
+    def UploadUpdate(self, request_iterator, context):
+        """Step 1: stream encrypted update bytes to server BEFORE submitting receipt
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def EnrollDevice(self, request, context):
-        """Phase 2 of enrollment: client submits the OTP obtained out-of-band
-        from the administrator.  Server verifies OTP, signs CSR, returns cert.
+    def SubmitReceipt(self, request, context):
+        """Step 2: submit receipt AFTER upload succeeds
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadGlobalModel(self, request, context):
+        """Server streams global aggregated model to client at round start
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -87,16 +127,6 @@ def add_OrchestratorServicer_to_server(servicer, server):
                     request_deserializer=orchestrator__pb2.CSR.FromString,
                     response_serializer=orchestrator__pb2.Certificate.SerializeToString,
             ),
-            'GetRound': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetRound,
-                    request_deserializer=orchestrator__pb2.DeviceId.FromString,
-                    response_serializer=orchestrator__pb2.RoundMetadata.SerializeToString,
-            ),
-            'SubmitReceipt': grpc.unary_unary_rpc_method_handler(
-                    servicer.SubmitReceipt,
-                    request_deserializer=orchestrator__pb2.Receipt.FromString,
-                    response_serializer=orchestrator__pb2.Ack.SerializeToString,
-            ),
             'RequestEnrollment': grpc.unary_unary_rpc_method_handler(
                     servicer.RequestEnrollment,
                     request_deserializer=orchestrator__pb2.EnrollmentRequest.FromString,
@@ -107,6 +137,26 @@ def add_OrchestratorServicer_to_server(servicer, server):
                     request_deserializer=orchestrator__pb2.EnrollRequest.FromString,
                     response_serializer=orchestrator__pb2.EnrollResponse.SerializeToString,
             ),
+            'GetRound': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRound,
+                    request_deserializer=orchestrator__pb2.DeviceId.FromString,
+                    response_serializer=orchestrator__pb2.RoundMetadata.SerializeToString,
+            ),
+            'UploadUpdate': grpc.stream_unary_rpc_method_handler(
+                    servicer.UploadUpdate,
+                    request_deserializer=orchestrator__pb2.UpdateChunk.FromString,
+                    response_serializer=orchestrator__pb2.UploadAck.SerializeToString,
+            ),
+            'SubmitReceipt': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitReceipt,
+                    request_deserializer=orchestrator__pb2.Receipt.FromString,
+                    response_serializer=orchestrator__pb2.Ack.SerializeToString,
+            ),
+            'DownloadGlobalModel': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadGlobalModel,
+                    request_deserializer=orchestrator__pb2.RoundRequest.FromString,
+                    response_serializer=orchestrator__pb2.ModelChunk.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'orchestrator.Orchestrator', rpc_method_handlers)
@@ -115,7 +165,17 @@ def add_OrchestratorServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Orchestrator(object):
-    """Missing associated documentation comment in .proto file."""
+    """SECURITY FIXES:
+    - UploadUpdate: client now streams encrypted model bytes to server.
+    Previously enc_uri was a local file path the server could never read.
+    - DownloadGlobalModel: server streams global model back to client.
+    - UpdateChunk includes per-chunk SHA-256 so server verifies integrity
+    of each chunk as it arrives (detects corruption/tampering in transit).
+    - Receipt.enc_handle replaces enc_uri — it is the server-side GridFS
+    ObjectId returned by UploadAck, NOT a local file path.
+    - epsilon_spent must now come from the real RDP accountant.
+
+    """
 
     @staticmethod
     def RegisterDevice(request,
@@ -131,40 +191,6 @@ class Orchestrator(object):
         return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/RegisterDevice',
             orchestrator__pb2.CSR.SerializeToString,
             orchestrator__pb2.Certificate.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def GetRound(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/GetRound',
-            orchestrator__pb2.DeviceId.SerializeToString,
-            orchestrator__pb2.RoundMetadata.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def SubmitReceipt(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/SubmitReceipt',
-            orchestrator__pb2.Receipt.SerializeToString,
-            orchestrator__pb2.Ack.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -199,5 +225,73 @@ class Orchestrator(object):
         return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/EnrollDevice',
             orchestrator__pb2.EnrollRequest.SerializeToString,
             orchestrator__pb2.EnrollResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetRound(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/GetRound',
+            orchestrator__pb2.DeviceId.SerializeToString,
+            orchestrator__pb2.RoundMetadata.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def UploadUpdate(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(request_iterator, target, '/orchestrator.Orchestrator/UploadUpdate',
+            orchestrator__pb2.UpdateChunk.SerializeToString,
+            orchestrator__pb2.UploadAck.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def SubmitReceipt(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/orchestrator.Orchestrator/SubmitReceipt',
+            orchestrator__pb2.Receipt.SerializeToString,
+            orchestrator__pb2.Ack.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def DownloadGlobalModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(request, target, '/orchestrator.Orchestrator/DownloadGlobalModel',
+            orchestrator__pb2.RoundRequest.SerializeToString,
+            orchestrator__pb2.ModelChunk.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
