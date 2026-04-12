@@ -969,14 +969,30 @@ pub async fn serve(
             std::fs::read(&cfg.tls.server_cert)?,
             std::fs::read(&cfg.tls.server_key)?,
         );
-        // Load the CA cert to verify client certificates (mutual TLS).
-        let client_ca = std::fs::read(&cfg.tls.ca_cert)?;
-        let tls = tonic::transport::ServerTlsConfig::new()
-            .identity(server_identity)
-            .client_ca_root(tonic::transport::Certificate::from_pem(client_ca));
 
-        tracing::info!("[SERVER] mTLS mode — binding to {}", addr);
-        println!("[SERVER] Running in mTLS mode on {}", addr);
+        // When require_client_cert = false: server-TLS only.
+        // Client verifies server cert (prevents MITM). Client cert not
+        // required at TLS layer — handlers enforce auth via device DB + ECDSA.
+        // When require_client_cert = true: full mTLS — both sides verified
+        // at TLS transport layer.
+        let tls = if cfg.server.require_client_cert {
+            let client_ca = std::fs::read(&cfg.tls.ca_cert)?;
+            tonic::transport::ServerTlsConfig::new()
+                .identity(server_identity)
+                .client_ca_root(tonic::transport::Certificate::from_pem(client_ca))
+        } else {
+            tonic::transport::ServerTlsConfig::new()
+                .identity(server_identity)
+        };
+
+        tracing::info!(
+            "[SERVER] TLS mode (require_client_cert={}) — binding to {}",
+            cfg.server.require_client_cert, addr
+        );
+        println!(
+            "[SERVER] TLS mode (require_client_cert={}) on {}",
+            cfg.server.require_client_cert, addr
+        );
 
         Server::builder()
             .tls_config(tls)?
@@ -984,20 +1000,16 @@ pub async fn serve(
             .serve(addr)
             .await?;
     } else {
-        // Insecure mode is intentionally left in for local development only.
-        // In production, enable_tls MUST be true.
         tracing::warn!("[SERVER] INSECURE mode — NOT for production");
         println!(
             "[SERVER] INSECURE mode on {} — set enable_tls=true in production",
             addr
         );
-
         Server::builder()
             .add_service(OrchestratorServer::new(svc))
             .serve(addr)
             .await?;
     }
-
     Ok(())
 }
 
